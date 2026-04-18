@@ -11,7 +11,8 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
+DEFAULT_NAMING_FORMAT = "{ChapterFullTitle}"
+LEGACY_DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
 
 
 class Store:
@@ -82,6 +83,14 @@ class Store:
                 VALUES ('default_naming_format', ?)
                 """,
                 (DEFAULT_NAMING_FORMAT,),
+            )
+            self._conn.execute(
+                """
+                UPDATE settings
+                SET value = ?
+                WHERE key = 'default_naming_format' AND value = ?
+                """,
+                (DEFAULT_NAMING_FORMAT, LEGACY_DEFAULT_NAMING_FORMAT),
             )
 
     def _ensure_column(self, table: str, column: str, column_type: str) -> None:

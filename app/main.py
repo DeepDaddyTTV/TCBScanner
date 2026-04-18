@@ -37,12 +37,16 @@ NAMING_VARIABLES = [
         "description": "Chapter number padded to four digits, such as 1180 or 0007.",
     },
     {
-        "name": "ChapterName",
-        "description": "Chapter title with the series name and chapter number removed.",
+        "name": "ChapterTitle",
+        "description": "Chapter title with the series name and chapter number removed, such as Omen.",
     },
     {
-        "name": "ChapterTitle",
-        "description": "Full chapter title from the source page.",
+        "name": "ChapterName",
+        "description": "Alias of ChapterTitle.",
+    },
+    {
+        "name": "ChapterFullTitle",
+        "description": "Full chapter title from the source page, such as One Piece Chapter 1180 Omen.",
     },
     {
         "name": "PageCount",

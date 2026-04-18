@@ -94,13 +94,13 @@ Open the options menu in the web app to set the default CBZ naming format for ev
 Default:
 
 ```text
-{ChapterTitle}
+{ChapterFullTitle}
 ```
 
 Example:
 
 ```text
-{SeriesName} - {ChapterNumber} - {ChapterName}
+{SeriesName} - Chapter {ChapterNumberPadded} - {ChapterTitle}
 ```
 
 Available variables:
@@ -108,8 +108,9 @@ Available variables:
 - `{SeriesName}`: Library title assigned to the series.
 - `{ChapterNumber}`: Chapter number detected from the source, such as `1180`.
 - `{ChapterNumberPadded}`: Chapter number padded to four digits, such as `0007` or `1180`.
-- `{ChapterName}`: Chapter title with the series name and chapter number removed, such as `Omen`.
-- `{ChapterTitle}`: Full chapter title from the source page, such as `One Piece Chapter 1180 Omen`.
+- `{ChapterTitle}`: Chapter title with the series name and chapter number removed, such as `Omen`.
+- `{ChapterName}`: Alias of `{ChapterTitle}`.
+- `{ChapterFullTitle}`: Full chapter title from the source page, such as `One Piece Chapter 1180 Omen`.
 - `{PageCount}`: Number of downloaded pages in the packaged CBZ.
 
 Unknown variables are ignored. File names are sanitized before writing to the manga library.

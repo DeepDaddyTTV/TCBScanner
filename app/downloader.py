@@ -208,25 +208,27 @@ def render_naming_template(
     page_count: int,
 ) -> str:
     series_name = str(series.get("title") or "Manga")
-    chapter_title = str(chapter.get("display_title") or "").strip()
+    chapter_full_title = str(chapter.get("display_title") or "").strip()
     chapter_number = str(chapter.get("chapter_key") or "").strip()
-    if not chapter_title:
-        chapter_title = f"{series_name} Chapter {chapter_number}".strip()
+    if not chapter_full_title:
+        chapter_full_title = f"{series_name} Chapter {chapter_number}".strip()
+    chapter_title = extract_chapter_name(series_name, chapter_full_title, chapter_number)
     values = {
         "SeriesName": series_name,
         "ChapterNumber": chapter_number,
         "ChapterNumberPadded": padded_chapter_number(chapter_number),
-        "ChapterName": extract_chapter_name(series_name, chapter_title, chapter_number),
         "ChapterTitle": chapter_title,
+        "ChapterName": chapter_title,
+        "ChapterFullTitle": chapter_full_title,
         "PageCount": str(page_count),
     }
 
     def replace(match: re.Match[str]) -> str:
         return values.get(match.group(1), "")
 
-    rendered = re.sub(r"\{([A-Za-z0-9_]+)\}", replace, template or "{ChapterTitle}")
+    rendered = re.sub(r"\{([A-Za-z0-9_]+)\}", replace, template or "{ChapterFullTitle}")
     rendered = re.sub(r"\s+", " ", rendered).strip(" -_.")
-    return safe_component(rendered, safe_component(chapter_title, "chapter")) + ".cbz"
+    return safe_component(rendered, safe_component(chapter_full_title, "chapter")) + ".cbz"
 
 
 def extract_chapter_name(series_name: str, chapter_title: str, chapter_number: str) -> str:

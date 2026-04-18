@@ -23,7 +23,7 @@ const state = {
   chapters: [],
   selectedChapterIds: new Set(),
   settings: {
-    default_naming_format: "{ChapterTitle}",
+    default_naming_format: "{ChapterFullTitle}",
     variables: [],
   },
 };
@@ -92,7 +92,7 @@ function renderSettings() {
   const form = $("#optionsForm");
   const input = form?.elements.default_naming_format;
   if (input && document.activeElement !== input) {
-    input.value = state.settings.default_naming_format || "{ChapterTitle}";
+    input.value = state.settings.default_naming_format || "{ChapterFullTitle}";
   }
 
   const variables = $("#namingVariables");
@@ -145,7 +145,7 @@ function renderSeries() {
           <div class="series-naming">
             <label>
               <span>Naming format</span>
-              <input data-field="naming-format" type="text" value="${escapeHtml(series.naming_format || "")}" placeholder="${escapeHtml(state.settings.default_naming_format || "{ChapterTitle}")}" />
+              <input data-field="naming-format" type="text" value="${escapeHtml(series.naming_format || "")}" placeholder="${escapeHtml(state.settings.default_naming_format || "{ChapterFullTitle}")}" />
             </label>
             <button class="small-action icon-only" data-action="saveNaming" title="Save naming format" aria-label="Save naming format">${icons.check}</button>
           </div>
@@ -359,7 +359,7 @@ $("#optionsForm").addEventListener("submit", async (event) => {
   await api("/api/settings", {
     method: "POST",
     body: JSON.stringify({
-      default_naming_format: String(form.get("default_naming_format") || "{ChapterTitle}"),
+      default_naming_format: String(form.get("default_naming_format") || "{ChapterFullTitle}"),
     }),
   });
   await refreshAll();
