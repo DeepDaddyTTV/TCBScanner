@@ -1,0 +1,24 @@
+name: tcbscanner
+
+services:
+  tcbscanner:
+    build:
+      context: .
+    container_name: ${TCBSCANNER_CONTAINER_NAME:-tcbscanner}
+    restart: unless-stopped
+    ports:
+      - "${TCBSCANNER_PORT:-18080}:8080"
+    environment:
+      TZ: ${TZ:-America/New_York}
+      DATA_DIR: /data
+      LIBRARY_DIR: /manga
+      WORK_DIR: /data/work
+      TCB_CHECK_SECONDS: ${TCB_CHECK_SECONDS:-60}
+      TCB_REQUEST_DELAY: ${TCB_REQUEST_DELAY:-0.8}
+    volumes:
+      - type: bind
+        source: ${TCBSCANNER_DATA_DIR:-./data}
+        target: /data
+      - type: bind
+        source: ${TCBSCANNER_MANGA_DIR:-./manga}
+        target: /manga

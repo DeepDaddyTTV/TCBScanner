@@ -1,0 +1,7 @@
+.env
+data/
+manga/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

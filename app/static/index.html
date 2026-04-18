@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TCBScanner</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">TCBScanner</p>
+            <h1>Manga CBZ queue</h1>
+          </div>
+          <button class="icon-button" id="refreshAll" title="Refresh dashboard" aria-label="Refresh dashboard">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14.9 4H2.8l3.4 3.4L9.7 16H7.5A6 6 0 1 0 6 12H4a8 8 0 1 1 16 0Z"/></svg>
+          </button>
+        </header>
+
+        <section class="setup-panel" aria-label="Add series">
+          <form id="seriesForm">
+            <label>
+              <span>Source URL</span>
+              <input name="source_url" type="url" required placeholder="https://tcbonepiecechapters.com/mangas/5/one-piece" />
+            </label>
+            <label>
+              <span>Library title</span>
+              <input name="title" type="text" required placeholder="One Piece" />
+            </label>
+            <label>
+              <span>Folder</span>
+              <input name="folder" type="text" placeholder="One Piece" />
+            </label>
+            <label>
+              <span>Interval</span>
+              <input name="check_interval_minutes" type="number" min="5" max="10080" value="60" />
+            </label>
+            <label class="toggle-line">
+              <input name="backfill_existing" type="checkbox" />
+              <span>Backfill existing chapters</span>
+            </label>
+            <label class="toggle-line">
+              <input name="enabled" type="checkbox" checked />
+              <span>Monitor automatically</span>
+            </label>
+            <button class="primary-action" type="submit">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+              <span>Add series</span>
+            </button>
+          </form>
+        </section>
+
+        <section class="content-grid">
+          <section class="series-region" aria-label="Series">
+            <div class="section-heading">
+              <h2>Series</h2>
+              <span id="seriesCount">0 tracked</span>
+            </div>
+            <div class="series-list" id="seriesList"></div>
+          </section>
+
+          <section class="chapter-region" aria-label="Chapters">
+            <div class="section-heading">
+              <h2 id="chapterTitle">Chapters</h2>
+              <span id="chapterCount">Select a series</span>
+            </div>
+            <div class="chapter-list" id="chapterList"></div>
+          </section>
+
+          <section class="activity-region" aria-label="Activity">
+            <div class="section-heading">
+              <h2>Activity</h2>
+              <span id="activityStatus">Live</span>
+            </div>
+            <div class="event-list" id="eventList"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
