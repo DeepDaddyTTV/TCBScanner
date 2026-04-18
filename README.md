@@ -1,6 +1,6 @@
 # TCBScanner
 
-A small Dockerized web app that monitors TCBScans series pages, downloads chapter images in page order, and packages each chapter as a `.cbz` file.
+A Docker container that monitors TCBScans series pages, downloads chapter images in page order, packages each chapter as a `.cbz` file, and adds the result to a local manga library.
 
 Use it only for content you are allowed to archive. The app does not bypass logins, paywalls, DRM, or access controls; it only reads public pages you provide and spaces requests out with a configurable delay.
 
