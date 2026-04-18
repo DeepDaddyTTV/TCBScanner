@@ -2,8 +2,7 @@ name: tcbscanner
 
 services:
   tcbscanner:
-    build:
-      context: .
+    image: ghcr.io/deepdaddyttv/tcbscanner:latest
     container_name: ${TCBSCANNER_CONTAINER_NAME:-tcbscanner}
     restart: unless-stopped
     ports:

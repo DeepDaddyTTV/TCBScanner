@@ -11,8 +11,7 @@ Use this compose file as a starting point:
 ```yaml
 services:
   tcbscanner:
-    build:
-      context: .
+    image: ghcr.io/deepdaddyttv/tcbscanner:latest
     container_name: ${TCBSCANNER_CONTAINER_NAME:-tcbscanner}
     restart: unless-stopped
     ports:
@@ -36,7 +35,8 @@ services:
 Start the container:
 
 ```powershell
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 Open [http://localhost:18080](http://localhost:18080).
