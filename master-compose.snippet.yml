@@ -17,7 +17,7 @@
       DATA_DIR: /data
       LIBRARY_DIR: /manga
       WORK_DIR: /data/work
-      TCB_CHECK_SECONDS: "60"
+      TCB_SCHEDULER_INTERVAL_HOURS: "1"
       TCB_REQUEST_DELAY: "0.8"
     volumes:
       - type: bind

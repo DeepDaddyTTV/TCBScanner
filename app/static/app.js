@@ -205,7 +205,7 @@ $("#seriesForm").addEventListener("submit", async (event) => {
     source_url: String(form.get("source_url") || ""),
     title: String(form.get("title") || ""),
     folder: String(form.get("folder") || ""),
-    check_interval_minutes: Number(form.get("check_interval_minutes") || 60),
+    check_interval_hours: Number(form.get("check_interval_hours") || 1),
     enabled: form.get("enabled") === "on",
     backfill_existing: form.get("backfill_existing") === "on",
   };
@@ -215,7 +215,7 @@ $("#seriesForm").addEventListener("submit", async (event) => {
   });
   event.currentTarget.reset();
   event.currentTarget.elements.enabled.checked = true;
-  event.currentTarget.elements.check_interval_minutes.value = 60;
+  event.currentTarget.elements.check_interval_hours.value = 1;
   await refreshAll();
 });
 

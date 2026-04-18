@@ -18,7 +18,10 @@ from .store import Store
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 LIBRARY_DIR = Path(os.getenv("LIBRARY_DIR", str(DATA_DIR / "library")))
 WORK_DIR = Path(os.getenv("WORK_DIR", str(DATA_DIR / "work")))
-CHECK_SECONDS = max(15, int(os.getenv("TCB_CHECK_SECONDS", "60")))
+SCHEDULER_INTERVAL_HOURS = max(
+    1.0,
+    float(os.getenv("TCB_SCHEDULER_INTERVAL_HOURS", "1")),
+)
 REQUEST_DELAY = max(0.2, float(os.getenv("TCB_REQUEST_DELAY", "0.8")))
 
 app = FastAPI(title="TCBScanner")
@@ -38,7 +41,7 @@ class SeriesCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     source_url: str = Field(min_length=1, max_length=500)
     folder: str = Field(default="", max_length=240)
-    check_interval_minutes: int = Field(default=60, ge=5, le=10080)
+    check_interval_hours: int = Field(default=1, ge=1, le=168)
     enabled: bool = True
     backfill_existing: bool = False
 
@@ -85,6 +88,7 @@ async def list_series() -> dict[str, Any]:
 @app.post("/api/series")
 async def create_series(payload: SeriesCreate) -> dict[str, Any]:
     data = payload.model_dump()
+    data["check_interval_minutes"] = data.pop("check_interval_hours") * 60
     if not data["folder"]:
         data["folder"] = data["title"]
     series = store.create_series(data)
@@ -175,7 +179,7 @@ async def monitor_loop() -> None:
             raise
         except Exception as exc:  # noqa: BLE001 - keep the scheduler alive
             store.add_event(None, None, "error", f"Monitor loop error: {exc}")
-        await asyncio.sleep(CHECK_SECONDS)
+        await asyncio.sleep(SCHEDULER_INTERVAL_HOURS * 3600)
 
 
 def parse_datetime(value: object) -> datetime | None:

@@ -47,18 +47,8 @@ The compose variables are:
 - `TCBSCANNER_DATA_DIR`: Host folder for SQLite and temporary work. Defaults to `./data`.
 - `TCBSCANNER_MANGA_DIR`: Host manga library folder mounted as `/manga`. Defaults to `./manga`.
 - `TZ`: Container time zone. Defaults to `America/New_York`.
-- `TCB_CHECK_SECONDS`: Scheduler wake-up interval in seconds. Defaults to `60`.
+- `TCB_SCHEDULER_INTERVAL_HOURS`: Scheduler wake-up interval in hours. Defaults to `1`.
 - `TCB_REQUEST_DELAY`: Delay between TCBScans requests in seconds. Defaults to `0.8`.
-
-## Master Compose
-
-I checked `C:\Docker\master-docker-compose.yml` and avoided the ports already used by the running stack. The master-compose snippet uses host port `18080`, state in `C:\Docker\TCBScanner\data`, and your manga library path mounted as `/manga`:
-
-```text
-P:\Media\10. Books\2. Manga\
-```
-
-To manage it from the master stack, copy the service block from `master-compose.snippet.yml` under the `services:` section in `C:\Docker\master-docker-compose.yml`.
 
 ## Add a Series
 
@@ -74,7 +64,7 @@ Fields:
 
 - `Library title`: Used for chapter file names when the source title is missing.
 - `Folder`: Relative folder under `/manga`. Leave it blank to use the library title.
-- `Interval`: Minutes between automatic checks for new chapters.
+- `Check interval (hours)`: Hours between automatic checks for new chapters.
 - `Backfill existing chapters`: If enabled, all discovered chapters are queued. If disabled, currently published chapters are indexed and only future chapters are downloaded.
 
 ## API
