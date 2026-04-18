@@ -4,13 +4,33 @@ A Docker container that monitors TCBScans series pages, downloads chapter images
 
 Use it only for content you are allowed to archive. The app does not bypass logins, paywalls, DRM, or access controls; it only reads public pages you provide and spaces requests out with a configurable delay.
 
-## Run
+## Docker Compose
 
-Copy the example environment file and edit the host paths if you want the data or manga library somewhere else:
+Use this compose file as a starting point:
 
-```powershell
-Copy-Item .env.example .env
-notepad .env
+```yaml
+services:
+  tcbscanner:
+    build:
+      context: .
+    container_name: ${TCBSCANNER_CONTAINER_NAME:-tcbscanner}
+    restart: unless-stopped
+    ports:
+      - "${TCBSCANNER_PORT:-18080}:8080"
+    environment:
+      TZ: ${TZ:-America/New_York}
+      DATA_DIR: /data
+      LIBRARY_DIR: /manga
+      WORK_DIR: /data/work
+      TCB_SCHEDULER_INTERVAL_HOURS: ${TCB_SCHEDULER_INTERVAL_HOURS:-1}
+      TCB_REQUEST_DELAY: ${TCB_REQUEST_DELAY:-0.8}
+    volumes:
+      - type: bind
+        source: ${TCBSCANNER_DATA_DIR:-./data}
+        target: /data
+      - type: bind
+        source: ${TCBSCANNER_MANGA_DIR:-./manga}
+        target: /manga
 ```
 
 Start the container:
@@ -33,11 +53,12 @@ Finished CBZ files are written inside the container at:
 /manga
 ```
 
-By default, `/manga` maps to `./manga` on the host. To attach an existing library, set `TCBSCANNER_MANGA_DIR` in `.env`.
+By default, `/manga` maps to `./manga` on the host. To attach an existing library, set `TCBSCANNER_MANGA_DIR` in a `.env` file next to your compose file.
 
-Example for a Windows library path:
+Example library paths:
 
 ```text
+TCBSCANNER_MANGA_DIR=/srv/manga
 TCBSCANNER_MANGA_DIR=D:/Media/Manga
 ```
 
