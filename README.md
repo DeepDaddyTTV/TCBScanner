@@ -71,7 +71,14 @@ Fields:
 - `Library title`: Used for chapter file names when the source title is missing.
 - `Folder`: Relative folder under `/manga`. Leave it blank to use the library title.
 - `Check interval (hours)`: Hours between automatic checks for new chapters.
-- `Backfill existing chapters`: If enabled, all discovered chapters are queued. If disabled, currently published chapters are indexed and only future chapters are downloaded.
+- `Download all found chapters`: If enabled, all discovered chapters are queued immediately. If disabled, currently published chapters are scanned into the chapter list without downloading.
+- `Monitor new chapters`: If enabled, future scans queue newly discovered chapters automatically.
+
+## Select Chapters
+
+Leave `Download all found chapters` off when you want to pick specific chapters. After the scan completes, open the series, select the chapters you want, and use `Queue selected`.
+
+Each series card also has a `Monitor` checkbox. Turn it on to keep checking for new chapters; turn it off when you only want manual scans.
 
 ## API
 
@@ -81,6 +88,7 @@ Fields:
 - `GET /api/series/{series_id}/chapters`
 - `POST /api/series/{series_id}/check`
 - `POST /api/series/{series_id}/download-missing`
+- `POST /api/series/{series_id}/queue-chapters`
 - `POST /api/chapters/{chapter_id}/retry`
 - `GET /api/events`
 

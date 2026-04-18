@@ -17,6 +17,7 @@ const state = {
   series: [],
   selectedSeriesId: null,
   chapters: [],
+  selectedChapterIds: new Set(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -56,11 +57,13 @@ async function loadSeries() {
 async function loadChapters(seriesId) {
   if (!seriesId) {
     state.chapters = [];
+    state.selectedChapterIds.clear();
     renderChapters();
     return;
   }
   const data = await api(`/api/series/${seriesId}/chapters`);
   state.chapters = data.chapters;
+  pruneSelectedChapters();
   renderChapters();
 }
 
@@ -87,7 +90,13 @@ function renderSeries() {
               <h3>${escapeHtml(series.title)}</h3>
               <p class="source-url">${escapeHtml(series.source_url)}</p>
             </div>
-            <span class="status-pill status-${enabled}">${enabled}</span>
+            <div class="series-status">
+              <label class="monitor-toggle">
+                <input type="checkbox" data-action="monitor" ${series.enabled ? "checked" : ""} />
+                <span>Monitor</span>
+              </label>
+              <span class="status-pill status-${enabled}">${enabled}</span>
+            </div>
           </div>
           <p class="path-text">${escapeHtml(series.folder)}</p>
           <div class="stats">
@@ -100,9 +109,6 @@ function renderSeries() {
             <button class="small-action" data-action="select" title="Show chapters">${icons.retry}<span>Open</span></button>
             <button class="small-action" data-action="check" title="Check now">${icons.check}<span>Check</span></button>
             <button class="small-action" data-action="download" title="Queue skipped and failed chapters">${icons.download}<span>Missing</span></button>
-            <button class="small-action" data-action="toggle" title="${series.enabled ? "Pause monitoring" : "Resume monitoring"}">
-              ${series.enabled ? icons.pause : icons.play}<span>${series.enabled ? "Pause" : "Resume"}</span>
-            </button>
             <button class="small-action danger-action" data-action="delete" title="Delete series">${icons.trash}<span>Delete</span></button>
           </div>
         </article>
@@ -119,17 +125,25 @@ function renderChapters() {
     : "Select a series";
   const list = $("#chapterList");
   if (!selected) {
+    renderSelectionTools();
     list.innerHTML = '<div class="empty-state">Select a series to see chapters.</div>';
     return;
   }
   if (!state.chapters.length) {
+    renderSelectionTools();
     list.innerHTML = '<div class="empty-state">No chapters indexed yet.</div>';
     return;
   }
+  renderSelectionTools();
   list.innerHTML = state.chapters
     .map((chapter) => {
+      const selectable = isChapterSelectable(chapter);
+      const checked = state.selectedChapterIds.has(chapter.id) ? "checked" : "";
+      const selectBox = selectable
+        ? `<input class="chapter-select" type="checkbox" data-chapter-id="${chapter.id}" ${checked} aria-label="Select ${escapeHtml(chapter.display_title)}" />`
+        : '<span class="chapter-select-spacer"></span>';
       const retryButton =
-        chapter.status === "failed" || chapter.status === "skipped"
+        selectable
           ? `<button class="small-action" data-chapter-id="${chapter.id}" data-action="retry">${icons.retry}<span>Queue</span></button>`
           : "";
       const meta = [
@@ -143,9 +157,12 @@ function renderChapters() {
         .join("");
       return `
         <article class="chapter-row">
-          <div class="chapter-main">
-            <h3>${escapeHtml(chapter.display_title)}</h3>
-            <div class="chapter-meta">${meta}</div>
+          <div class="chapter-content">
+            ${selectBox}
+            <div class="chapter-main">
+              <h3>${escapeHtml(chapter.display_title)}</h3>
+              <div class="chapter-meta">${meta}</div>
+            </div>
           </div>
           <div class="actions">
             <span class="status-pill status-${escapeHtml(chapter.status)}">${escapeHtml(chapter.status)}</span>
@@ -178,6 +195,17 @@ function renderEvents(events) {
     .join("");
 }
 
+function renderSelectionTools() {
+  const tools = $("#chapterTools");
+  const selectableCount = state.chapters.filter(isChapterSelectable).length;
+  const selectedCount = countSelectedVisibleChapters();
+  tools.classList.toggle("hidden", selectableCount === 0);
+  $("#selectedCount").textContent = `${selectedCount} selected`;
+  $("#queueSelectedChapters").disabled = selectedCount === 0;
+  $("#selectVisibleChapters").disabled = selectableCount === 0;
+  $("#clearSelectedChapters").disabled = selectedCount === 0;
+}
+
 function stat(value, label) {
   return `<div class="stat"><strong>${Number(value || 0)}</strong><span>${label}</span></div>`;
 }
@@ -196,6 +224,24 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function isChapterSelectable(chapter) {
+  return chapter.status === "failed" || chapter.status === "skipped";
+}
+
+function pruneSelectedChapters() {
+  const selectableIds = new Set(state.chapters.filter(isChapterSelectable).map((chapter) => chapter.id));
+  for (const chapterId of state.selectedChapterIds) {
+    if (!selectableIds.has(chapterId)) {
+      state.selectedChapterIds.delete(chapterId);
+    }
+  }
+}
+
+function countSelectedVisibleChapters() {
+  const visibleIds = new Set(state.chapters.map((chapter) => chapter.id));
+  return [...state.selectedChapterIds].filter((chapterId) => visibleIds.has(chapterId)).length;
 }
 
 $("#seriesForm").addEventListener("submit", async (event) => {
@@ -241,16 +287,22 @@ $("#seriesList").addEventListener("click", async (event) => {
   if (action === "download") {
     await api(`/api/series/${seriesId}/download-missing`, { method: "POST" });
   }
-  if (action === "toggle") {
-    const series = state.series.find((item) => item.id === seriesId);
-    await api(`/api/series/${seriesId}/enabled`, {
-      method: "POST",
-      body: JSON.stringify({ enabled: !series.enabled }),
-    });
-  }
   if (action === "delete") {
     await api(`/api/series/${seriesId}`, { method: "DELETE" });
   }
+  await refreshAll();
+});
+
+$("#seriesList").addEventListener("change", async (event) => {
+  const input = event.target.closest("input[data-action='monitor']");
+  if (!input) return;
+  const card = event.target.closest("[data-series-id]");
+  const seriesId = Number(card?.dataset.seriesId);
+  if (!seriesId) return;
+  await api(`/api/series/${seriesId}/enabled`, {
+    method: "POST",
+    body: JSON.stringify({ enabled: input.checked }),
+  });
   await refreshAll();
 });
 
@@ -258,6 +310,47 @@ $("#chapterList").addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action='retry']");
   if (!button) return;
   await api(`/api/chapters/${Number(button.dataset.chapterId)}/retry`, { method: "POST" });
+  await refreshAll();
+});
+
+$("#chapterList").addEventListener("change", (event) => {
+  const input = event.target.closest(".chapter-select");
+  if (!input) return;
+  const chapterId = Number(input.dataset.chapterId);
+  if (input.checked) {
+    state.selectedChapterIds.add(chapterId);
+  } else {
+    state.selectedChapterIds.delete(chapterId);
+  }
+  renderSelectionTools();
+});
+
+$("#selectVisibleChapters").addEventListener("click", () => {
+  for (const chapter of state.chapters.filter(isChapterSelectable)) {
+    state.selectedChapterIds.add(chapter.id);
+  }
+  renderChapters();
+});
+
+$("#clearSelectedChapters").addEventListener("click", () => {
+  for (const chapter of state.chapters) {
+    state.selectedChapterIds.delete(chapter.id);
+  }
+  renderChapters();
+});
+
+$("#queueSelectedChapters").addEventListener("click", async () => {
+  const selectedIds = state.chapters
+    .filter((chapter) => state.selectedChapterIds.has(chapter.id) && isChapterSelectable(chapter))
+    .map((chapter) => chapter.id);
+  if (!state.selectedSeriesId || !selectedIds.length) return;
+  await api(`/api/series/${state.selectedSeriesId}/queue-chapters`, {
+    method: "POST",
+    body: JSON.stringify({ chapter_ids: selectedIds }),
+  });
+  for (const chapterId of selectedIds) {
+    state.selectedChapterIds.delete(chapterId);
+  }
   await refreshAll();
 });
 

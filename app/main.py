@@ -63,6 +63,10 @@ class EnabledUpdate(BaseModel):
     enabled: bool
 
 
+class QueueChapters(BaseModel):
+    chapter_ids: list[int] = Field(default_factory=list, max_length=1000)
+
+
 @app.on_event("startup")
 async def startup() -> None:
     global monitor_task
@@ -133,6 +137,16 @@ async def download_missing(series_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Series not found.")
     changed = store.mark_missing_pending(series_id)
     store.add_event(series_id, None, "info", f"Queued {changed} skipped or failed chapter(s).")
+    schedule_download(series_id)
+    return {"queued": changed}
+
+
+@app.post("/api/series/{series_id}/queue-chapters")
+async def queue_chapters(series_id: int, payload: QueueChapters) -> dict[str, Any]:
+    if not store.get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found.")
+    changed = store.mark_selected_pending(series_id, payload.chapter_ids)
+    store.add_event(series_id, None, "info", f"Queued {changed} selected chapter(s).")
     schedule_download(series_id)
     return {"queued": changed}
 

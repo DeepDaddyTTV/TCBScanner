@@ -298,6 +298,24 @@ class Store:
             )
             return int(cur.rowcount)
 
+    def mark_selected_pending(self, series_id: int, chapter_ids: list[int]) -> int:
+        clean_ids = sorted({int(chapter_id) for chapter_id in chapter_ids if int(chapter_id) > 0})
+        if not clean_ids:
+            return 0
+        placeholders = ",".join("?" for _ in clean_ids)
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                f"""
+                UPDATE chapters
+                SET status = 'pending', error = NULL
+                WHERE series_id = ?
+                  AND id IN ({placeholders})
+                  AND status IN ('failed', 'skipped')
+                """,
+                (series_id, *clean_ids),
+            )
+            return int(cur.rowcount)
+
     def add_event(
         self,
         series_id: int | None,

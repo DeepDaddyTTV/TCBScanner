@@ -39,15 +39,15 @@
             </label>
             <label class="toggle-line">
               <input name="backfill_existing" type="checkbox" />
-              <span>Backfill existing chapters</span>
+              <span>Download all found chapters</span>
             </label>
             <label class="toggle-line">
               <input name="enabled" type="checkbox" checked />
-              <span>Monitor automatically</span>
+              <span>Monitor new chapters</span>
             </label>
             <button class="primary-action" type="submit">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
-              <span>Add series</span>
+              <span>Scan series</span>
             </button>
           </form>
         </section>
@@ -65,6 +65,15 @@
             <div class="section-heading">
               <h2 id="chapterTitle">Chapters</h2>
               <span id="chapterCount">Select a series</span>
+            </div>
+            <div class="chapter-tools" id="chapterTools">
+              <button class="small-action" id="selectVisibleChapters" type="button">Select found</button>
+              <button class="small-action" id="clearSelectedChapters" type="button">Clear</button>
+              <button class="small-action" id="queueSelectedChapters" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v8l3.3-3.3 1.4 1.4L12 15.8 6.3 10.1l1.4-1.4L11 12V4Zm-5 14h12v2H6v-2Z"/></svg>
+                <span>Queue selected</span>
+              </button>
+              <span id="selectedCount">0 selected</span>
             </div>
             <div class="chapter-list" id="chapterList"></div>
           </section>

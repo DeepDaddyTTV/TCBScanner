@@ -50,7 +50,11 @@ button {
 .chapter-row,
 .event-row,
 .actions,
-.toggle-line {
+.toggle-line,
+.series-status,
+.chapter-tools,
+.chapter-content,
+.monitor-toggle {
   display: flex;
   align-items: center;
 }
@@ -143,7 +147,9 @@ input:focus {
   color: var(--ink);
 }
 
-.toggle-line input {
+.toggle-line input,
+.monitor-toggle input,
+.chapter-select {
   width: 18px;
   height: 18px;
   accent-color: var(--green);
@@ -175,6 +181,11 @@ input:focus {
   color: var(--ink);
   background: #f8fafc;
   border-color: var(--line);
+}
+
+.small-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .danger-action {
@@ -245,6 +256,21 @@ svg {
   align-items: flex-start;
 }
 
+.series-status {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.monitor-toggle {
+  display: flex;
+  min-height: 26px;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .source-url,
 .path-text {
   margin: 0;
@@ -287,6 +313,22 @@ svg {
   gap: 8px;
 }
 
+.chapter-tools {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chapter-tools.hidden {
+  display: none;
+}
+
+.chapter-tools > span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -324,7 +366,24 @@ svg {
   padding: 12px;
 }
 
+.chapter-content {
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+}
+
+.chapter-select,
+.chapter-select-spacer {
+  flex: none;
+}
+
+.chapter-select-spacer {
+  width: 18px;
+  height: 18px;
+}
+
 .chapter-main {
+  flex: 1;
   min-width: 0;
 }
 
