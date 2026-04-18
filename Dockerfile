@@ -8,16 +8,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN adduser --disabled-password --gecos "" appuser \
-    && mkdir -p /data/work /manga \
-    && chown -R appuser:appuser /data /manga
+RUN mkdir -p /data/work /manga
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-
-USER appuser
 
 EXPOSE 8080
 

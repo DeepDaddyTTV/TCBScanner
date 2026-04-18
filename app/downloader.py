@@ -151,7 +151,7 @@ class MangaDownloader:
                 image_path.write_bytes(content)
                 image_paths.append(image_path)
 
-            destination = self._chapter_cbz_path(series, chapter)
+            destination = self._chapter_cbz_path(series, chapter, page_count=len(image_paths))
             destination.parent.mkdir(parents=True, exist_ok=True)
             temp_destination = destination.with_suffix(destination.suffix + ".tmp")
             with zipfile.ZipFile(temp_destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -184,17 +184,72 @@ class MangaDownloader:
             if staging_dir.exists():
                 shutil.rmtree(staging_dir, ignore_errors=True)
 
-    def _chapter_cbz_path(self, series: dict[str, Any], chapter: dict[str, Any]) -> Path:
+    def _chapter_cbz_path(
+        self,
+        series: dict[str, Any],
+        chapter: dict[str, Any],
+        *,
+        page_count: int,
+    ) -> Path:
         folder = resolve_library_folder(
             self.library_dir,
             str(series.get("folder") or ""),
             str(series.get("title") or "Manga"),
         )
-        chapter_title = str(chapter.get("display_title") or "")
-        if not chapter_title:
-            chapter_title = f"{series['title']} Chapter {chapter['chapter_key']}"
-        file_name = safe_component(chapter_title, "chapter") + ".cbz"
+        template = str(series.get("naming_format") or self.store.get_default_naming_format())
+        file_name = render_naming_template(series, chapter, template, page_count)
         return folder / file_name
+
+
+def render_naming_template(
+    series: dict[str, Any],
+    chapter: dict[str, Any],
+    template: str,
+    page_count: int,
+) -> str:
+    series_name = str(series.get("title") or "Manga")
+    chapter_title = str(chapter.get("display_title") or "").strip()
+    chapter_number = str(chapter.get("chapter_key") or "").strip()
+    if not chapter_title:
+        chapter_title = f"{series_name} Chapter {chapter_number}".strip()
+    values = {
+        "SeriesName": series_name,
+        "ChapterNumber": chapter_number,
+        "ChapterNumberPadded": padded_chapter_number(chapter_number),
+        "ChapterName": extract_chapter_name(series_name, chapter_title, chapter_number),
+        "ChapterTitle": chapter_title,
+        "PageCount": str(page_count),
+    }
+
+    def replace(match: re.Match[str]) -> str:
+        return values.get(match.group(1), "")
+
+    rendered = re.sub(r"\{([A-Za-z0-9_]+)\}", replace, template or "{ChapterTitle}")
+    rendered = re.sub(r"\s+", " ", rendered).strip(" -_.")
+    return safe_component(rendered, safe_component(chapter_title, "chapter")) + ".cbz"
+
+
+def extract_chapter_name(series_name: str, chapter_title: str, chapter_number: str) -> str:
+    name = chapter_title.strip()
+    if series_name:
+        name = re.sub(rf"^{re.escape(series_name)}\s*", "", name, flags=re.IGNORECASE).strip()
+    if chapter_number:
+        name = re.sub(
+            rf"^[-:\s]*(?:chapter\s*)?{re.escape(chapter_number)}\b[-:\s]*",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        ).strip()
+    name = re.sub(r"^chapter\s+[-:\s]*", "", name, flags=re.IGNORECASE).strip()
+    return name or chapter_title
+
+
+def padded_chapter_number(chapter_number: str) -> str:
+    match = re.fullmatch(r"(\d+)(\.\d+)?", chapter_number.strip())
+    if not match:
+        return chapter_number
+    whole, decimal = match.groups()
+    return whole.zfill(4) + (decimal or "")
 
 
 def resolve_library_folder(library_dir: Path, folder: str, title: str) -> Path:

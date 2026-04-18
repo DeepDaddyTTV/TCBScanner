@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from .downloader import MangaDownloader
-from .store import Store
+from .store import DEFAULT_NAMING_FORMAT, Store
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
@@ -23,6 +23,32 @@ SCHEDULER_INTERVAL_HOURS = max(
     float(os.getenv("TCB_SCHEDULER_INTERVAL_HOURS", "1")),
 )
 REQUEST_DELAY = max(0.2, float(os.getenv("TCB_REQUEST_DELAY", "0.8")))
+NAMING_VARIABLES = [
+    {
+        "name": "SeriesName",
+        "description": "Library title assigned to the series.",
+    },
+    {
+        "name": "ChapterNumber",
+        "description": "Chapter number detected from the source, such as 1180.",
+    },
+    {
+        "name": "ChapterNumberPadded",
+        "description": "Chapter number padded to four digits, such as 1180 or 0007.",
+    },
+    {
+        "name": "ChapterName",
+        "description": "Chapter title with the series name and chapter number removed.",
+    },
+    {
+        "name": "ChapterTitle",
+        "description": "Full chapter title from the source page.",
+    },
+    {
+        "name": "PageCount",
+        "description": "Number of downloaded pages in the CBZ.",
+    },
+]
 
 app = FastAPI(title="TCBScanner")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -42,6 +68,7 @@ class SeriesCreate(BaseModel):
     source_url: str = Field(min_length=1, max_length=500)
     folder: str = Field(default="", max_length=240)
     check_interval_hours: int = Field(default=1, ge=1, le=168)
+    naming_format: str | None = Field(default=None, max_length=180)
     enabled: bool = True
     backfill_existing: bool = False
 
@@ -61,6 +88,18 @@ class SeriesCreate(BaseModel):
 
 class EnabledUpdate(BaseModel):
     enabled: bool
+
+
+class NamingFormatUpdate(BaseModel):
+    naming_format: str | None = Field(default=None, max_length=180)
+
+
+class SettingsUpdate(BaseModel):
+    default_naming_format: str = Field(
+        default=DEFAULT_NAMING_FORMAT,
+        min_length=1,
+        max_length=180,
+    )
 
 
 class QueueChapters(BaseModel):
@@ -89,6 +128,23 @@ async def list_series() -> dict[str, Any]:
     return {"series": store.list_series()}
 
 
+@app.get("/api/settings")
+async def get_settings() -> dict[str, Any]:
+    return {
+        "default_naming_format": store.get_default_naming_format(),
+        "variables": NAMING_VARIABLES,
+    }
+
+
+@app.post("/api/settings")
+async def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
+    store.set_setting(
+        "default_naming_format",
+        " ".join(payload.default_naming_format.strip().split()),
+    )
+    return await get_settings()
+
+
 @app.post("/api/series")
 async def create_series(payload: SeriesCreate) -> dict[str, Any]:
     data = payload.model_dump()
@@ -113,6 +169,14 @@ async def set_enabled(series_id: int, payload: EnabledUpdate) -> dict[str, Any]:
     if not store.get_series(series_id):
         raise HTTPException(status_code=404, detail="Series not found.")
     series = store.set_series_enabled(series_id, payload.enabled)
+    return {"series": series}
+
+
+@app.post("/api/series/{series_id}/naming-format")
+async def set_naming_format(series_id: int, payload: NamingFormatUpdate) -> dict[str, Any]:
+    if not store.get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found.")
+    series = store.set_series_naming_format(series_id, payload.naming_format)
     return {"series": series}
 
 

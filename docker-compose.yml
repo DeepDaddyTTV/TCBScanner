@@ -3,6 +3,7 @@ services:
     image: ghcr.io/deepdaddyttv/tcbscanner:latest
     container_name: tcb_scanner
     restart: unless-stopped
+    user: "0:0"
     ports:
       - 18080:8080
     volumes:

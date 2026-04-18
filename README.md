@@ -14,6 +14,7 @@ services:
     image: ghcr.io/deepdaddyttv/tcbscanner:latest
     container_name: tcb_scanner
     restart: unless-stopped
+    user: "0:0"
     ports:
       - 18080:8080
     volumes:
@@ -42,19 +43,25 @@ docker compose up -d
 
 Open [http://localhost:18080](http://localhost:18080).
 
-The SQLite database and temporary working folders live under:
+Compose settings:
 
-```text
-./data
-```
+- `image`: Published container image. Use `ghcr.io/deepdaddyttv/tcbscanner:latest` for the current release.
+- `container_name`: Friendly Docker container name.
+- `restart`: Keeps the scanner running after Docker or host restarts.
+- `user`: Runs the container as `root` by default so mounted manga folders can be written even when the host folder owner does not match a container user.
+- `ports`: Maps the host web port to the container web port. `18080:8080` makes the app available at `http://localhost:18080`.
+- `./data:/data`: Stores the SQLite database and temporary download work files.
+- `./manga:/manga`: Stores finished CBZ files. Change the left side to attach an existing manga library, for example `D:/Media/Manga:/manga` or `/srv/manga:/manga`.
+- `TZ`: Time zone used by the container for logs and scheduled checks.
 
-Finished CBZ files are written inside the container at:
+Supported environment variables:
 
-```text
-/manga
-```
-
-By default, `/manga` maps to `./manga` on the host. To attach an existing library, change the left side of the volume mount, for example `D:/Media/Manga:/manga` or `/srv/manga:/manga`.
+- `TZ`: Time zone used by the container for logs and scheduled checks. Default: Docker image default if unset.
+- `DATA_DIR`: Container path for the database and state files. Default: `/data`.
+- `LIBRARY_DIR`: Container path where finished CBZ files are written. Default: `/manga`.
+- `WORK_DIR`: Container path for temporary image downloads before packaging. Default: `/data/work`.
+- `TCB_SCHEDULER_INTERVAL_HOURS`: How often the background scheduler wakes up to look for due series, in hours. Default: `1`.
+- `TCB_REQUEST_DELAY`: Delay between TCBScans requests, in seconds. Default: `0.8`.
 
 ## Add a Series
 
@@ -80,14 +87,44 @@ Leave `Download all found chapters` off when you want to pick specific chapters.
 
 Each series card also has a `Monitor` checkbox. Turn it on to keep checking for new chapters; turn it off when you only want manual scans.
 
+## Naming Formats
+
+Open the options menu in the web app to set the default CBZ naming format for every series. Each series card also has a `Naming format` field; leave it blank to use the default, or set a series-specific override.
+
+Default:
+
+```text
+{ChapterTitle}
+```
+
+Example:
+
+```text
+{SeriesName} - {ChapterNumber} - {ChapterName}
+```
+
+Available variables:
+
+- `{SeriesName}`: Library title assigned to the series.
+- `{ChapterNumber}`: Chapter number detected from the source, such as `1180`.
+- `{ChapterNumberPadded}`: Chapter number padded to four digits, such as `0007` or `1180`.
+- `{ChapterName}`: Chapter title with the series name and chapter number removed, such as `Omen`.
+- `{ChapterTitle}`: Full chapter title from the source page, such as `One Piece Chapter 1180 Omen`.
+- `{PageCount}`: Number of downloaded pages in the packaged CBZ.
+
+Unknown variables are ignored. File names are sanitized before writing to the manga library.
+
 ## API
 
 - `GET /api/series`
 - `POST /api/series`
+- `GET /api/settings`
+- `POST /api/settings`
 - `DELETE /api/series/{series_id}`
 - `GET /api/series/{series_id}/chapters`
 - `POST /api/series/{series_id}/check`
 - `POST /api/series/{series_id}/download-missing`
+- `POST /api/series/{series_id}/naming-format`
 - `POST /api/series/{series_id}/queue-chapters`
 - `POST /api/chapters/{chapter_id}/retry`
 - `GET /api/events`

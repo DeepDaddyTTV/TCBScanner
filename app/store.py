@@ -11,6 +11,9 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
+
+
 class Store:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -65,8 +68,26 @@ class Store:
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
+            self._ensure_column("series", "naming_format", "TEXT")
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO settings (key, value)
+                VALUES ('default_naming_format', ?)
+                """,
+                (DEFAULT_NAMING_FORMAT,),
+            )
+
+    def _ensure_column(self, table: str, column: str, column_type: str) -> None:
+        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if column not in {str(row["name"]) for row in rows}:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
     def create_series(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()
@@ -75,9 +96,9 @@ class Store:
                 """
                 INSERT INTO series (
                     title, source_url, folder, check_interval_minutes,
-                    enabled, backfill_existing, initialized, created_at
+                    enabled, backfill_existing, initialized, created_at, naming_format
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
                 (
                     payload["title"],
@@ -87,6 +108,7 @@ class Store:
                     1 if payload.get("enabled", True) else 0,
                     1 if payload.get("backfill_existing", False) else 0,
                     now,
+                    payload.get("naming_format") or None,
                 ),
             )
             series_id = int(cur.lastrowid)
@@ -151,6 +173,20 @@ class Store:
             "info",
             "Monitoring enabled." if enabled else "Monitoring paused.",
         )
+        return self.get_series(series_id)
+
+    def set_series_naming_format(
+        self,
+        series_id: int,
+        naming_format: str | None,
+    ) -> dict[str, Any] | None:
+        cleaned = " ".join((naming_format or "").strip().split())
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE series SET naming_format = ? WHERE id = ?",
+                (cleaned or None, series_id),
+            )
+        self.add_event(series_id, None, "info", "Series naming format updated.")
         return self.get_series(series_id)
 
     def delete_series(self, series_id: int) -> None:
@@ -315,6 +351,28 @@ class Store:
                 (series_id, *clean_ids),
             )
             return int(cur.rowcount)
+
+    def get_default_naming_format(self) -> str:
+        return self.get_setting("default_naming_format") or DEFAULT_NAMING_FORMAT
+
+    def get_setting(self, key: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM settings WHERE key = ?",
+                (key,),
+            ).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
 
     def add_event(
         self,

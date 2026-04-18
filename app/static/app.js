@@ -11,6 +11,10 @@ const icons = {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.8 11H7.8L7 9Z"/></svg>',
   retry:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.2L13 11h8V3l-3.3 3.3Z"/></svg>',
+  moon:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a6 6 0 0 0 5.2-9A7.5 7.5 0 1 1 9 17.7 6 6 0 0 0 12 18Z"/></svg>',
+  sun:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2h2v3h-2V2Zm0 17h2v3h-2v-3ZM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1Zm12.1 12.1 1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1ZM2 11h3v2H2v-2Zm17 0h3v2h-3v-2ZM5.6 19.8l-1.4-1.4 2.1-2.1 1.4 1.4-2.1 2.1ZM18.4 4.2l1.4 1.4-2.1 2.1-1.4-1.4 2.1-2.1ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg>',
 };
 
 const state = {
@@ -18,9 +22,14 @@ const state = {
   selectedSeriesId: null,
   chapters: [],
   selectedChapterIds: new Set(),
+  settings: {
+    default_naming_format: "{ChapterTitle}",
+    variables: [],
+  },
 };
 
 const $ = (selector) => document.querySelector(selector);
+const themeKey = "tcbscanner-theme";
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -35,11 +44,18 @@ async function api(path, options = {}) {
 }
 
 async function refreshAll() {
+  await loadSettings();
   await loadSeries();
   if (state.selectedSeriesId) {
     await loadChapters(state.selectedSeriesId);
   }
   await loadEvents();
+}
+
+async function loadSettings() {
+  const data = await api("/api/settings");
+  state.settings = data;
+  renderSettings();
 }
 
 async function loadSeries() {
@@ -72,8 +88,35 @@ async function loadEvents() {
   renderEvents(data.events);
 }
 
+function renderSettings() {
+  const form = $("#optionsForm");
+  const input = form?.elements.default_naming_format;
+  if (input && document.activeElement !== input) {
+    input.value = state.settings.default_naming_format || "{ChapterTitle}";
+  }
+
+  const variables = $("#namingVariables");
+  if (!variables) return;
+  variables.innerHTML = (state.settings.variables || [])
+    .map(
+      (variable) => `
+        <div class="variable-item">
+          <code>{${escapeHtml(variable.name)}}</code>
+          <span>${escapeHtml(variable.description)}</span>
+        </div>
+      `,
+    )
+    .join("");
+}
+
 function renderSeries() {
   const list = $("#seriesList");
+  const active = document.activeElement;
+  const editingInput = active?.matches("input[data-field='naming-format']") ? active : null;
+  const editingSeriesId = Number(editingInput?.closest("[data-series-id]")?.dataset.seriesId || 0);
+  const editingValue = editingInput?.value ?? "";
+  const editingStart = editingInput?.selectionStart ?? editingValue.length;
+  const editingEnd = editingInput?.selectionEnd ?? editingValue.length;
   $("#seriesCount").textContent = `${state.series.length} tracked`;
   if (!state.series.length) {
     list.innerHTML = '<div class="empty-state">No series tracked yet.</div>';
@@ -99,6 +142,13 @@ function renderSeries() {
             </div>
           </div>
           <p class="path-text">${escapeHtml(series.folder)}</p>
+          <div class="series-naming">
+            <label>
+              <span>Naming format</span>
+              <input data-field="naming-format" type="text" value="${escapeHtml(series.naming_format || "")}" placeholder="${escapeHtml(state.settings.default_naming_format || "{ChapterTitle}")}" />
+            </label>
+            <button class="small-action icon-only" data-action="saveNaming" title="Save naming format" aria-label="Save naming format">${icons.check}</button>
+          </div>
           <div class="stats">
             ${stat(series.chapter_count, "found")}
             ${stat(series.downloaded_count, "cbz")}
@@ -115,6 +165,16 @@ function renderSeries() {
       `;
     })
     .join("");
+  if (editingSeriesId) {
+    const restored = list.querySelector(
+      `[data-series-id="${editingSeriesId}"] input[data-field="naming-format"]`,
+    );
+    if (restored) {
+      restored.value = editingValue;
+      restored.focus();
+      restored.setSelectionRange(editingStart, editingEnd);
+    }
+  }
 }
 
 function renderChapters() {
@@ -226,6 +286,23 @@ function formatDate(value) {
   return date.toLocaleString();
 }
 
+function setTheme(theme) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = normalized;
+  localStorage.setItem(themeKey, normalized);
+  const button = $("#themeToggle");
+  if (!button) return;
+  button.innerHTML = normalized === "dark" ? icons.sun : icons.moon;
+  button.title = normalized === "dark" ? "Use light mode" : "Use dark mode";
+  button.setAttribute("aria-label", button.title);
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(themeKey);
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  setTheme(saved || (prefersDark ? "dark" : "light"));
+}
+
 function isChapterSelectable(chapter) {
   return chapter.status === "failed" || chapter.status === "skipped";
 }
@@ -267,6 +344,27 @@ $("#seriesForm").addEventListener("submit", async (event) => {
 
 $("#refreshAll").addEventListener("click", refreshAll);
 
+$("#optionsToggle").addEventListener("click", () => {
+  $("#optionsPanel").classList.toggle("hidden");
+});
+
+$("#themeToggle").addEventListener("click", () => {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  setTheme(nextTheme);
+});
+
+$("#optionsForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({
+      default_naming_format: String(form.get("default_naming_format") || "{ChapterTitle}"),
+    }),
+  });
+  await refreshAll();
+});
+
 $("#seriesList").addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -286,6 +384,13 @@ $("#seriesList").addEventListener("click", async (event) => {
   }
   if (action === "download") {
     await api(`/api/series/${seriesId}/download-missing`, { method: "POST" });
+  }
+  if (action === "saveNaming") {
+    const input = card.querySelector("input[data-field='naming-format']");
+    await api(`/api/series/${seriesId}/naming-format`, {
+      method: "POST",
+      body: JSON.stringify({ naming_format: input?.value || null }),
+    });
   }
   if (action === "delete") {
     await api(`/api/series/${seriesId}`, { method: "DELETE" });
@@ -354,5 +459,6 @@ $("#queueSelectedChapters").addEventListener("click", async () => {
   await refreshAll();
 });
 
+initTheme();
 refreshAll();
 setInterval(refreshAll, 8000);
