@@ -32,9 +32,19 @@ services:
         target: /manga
 ```
 
-Start the container:
+Clone and start the container:
 
 ```powershell
+git clone https://github.com/DeepDaddyTTV/TCBScanner.git
+cd TCBScanner
+docker compose pull
+docker compose up -d
+```
+
+Update an existing install:
+
+```powershell
+git pull
 docker compose pull
 docker compose up -d
 ```
