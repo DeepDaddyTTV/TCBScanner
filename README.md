@@ -12,24 +12,15 @@ Use this compose file as a starting point:
 services:
   tcbscanner:
     image: ghcr.io/deepdaddyttv/tcbscanner:latest
-    container_name: ${TCBSCANNER_CONTAINER_NAME:-tcbscanner}
+    container_name: tcb_scanner
     restart: unless-stopped
     ports:
-      - "${TCBSCANNER_PORT:-18080}:8080"
-    environment:
-      TZ: ${TZ:-America/New_York}
-      DATA_DIR: /data
-      LIBRARY_DIR: /manga
-      WORK_DIR: /data/work
-      TCB_SCHEDULER_INTERVAL_HOURS: ${TCB_SCHEDULER_INTERVAL_HOURS:-1}
-      TCB_REQUEST_DELAY: ${TCB_REQUEST_DELAY:-0.8}
+      - 18080:8080
     volumes:
-      - type: bind
-        source: ${TCBSCANNER_DATA_DIR:-./data}
-        target: /data
-      - type: bind
-        source: ${TCBSCANNER_MANGA_DIR:-./manga}
-        target: /manga
+      - ./data:/data
+      - ./manga:/manga
+    environment:
+      TZ: "America/New_York"
 ```
 
 Clone and start the container:
@@ -63,23 +54,7 @@ Finished CBZ files are written inside the container at:
 /manga
 ```
 
-By default, `/manga` maps to `./manga` on the host. To attach an existing library, set `TCBSCANNER_MANGA_DIR` in a `.env` file next to your compose file.
-
-Example library paths:
-
-```text
-TCBSCANNER_MANGA_DIR=/srv/manga
-TCBSCANNER_MANGA_DIR=D:/Media/Manga
-```
-
-The compose variables are:
-
-- `TCBSCANNER_PORT`: Host web UI port. Defaults to `18080`.
-- `TCBSCANNER_DATA_DIR`: Host folder for SQLite and temporary work. Defaults to `./data`.
-- `TCBSCANNER_MANGA_DIR`: Host manga library folder mounted as `/manga`. Defaults to `./manga`.
-- `TZ`: Container time zone. Defaults to `America/New_York`.
-- `TCB_SCHEDULER_INTERVAL_HOURS`: Scheduler wake-up interval in hours. Defaults to `1`.
-- `TCB_REQUEST_DELAY`: Delay between TCBScans requests in seconds. Defaults to `0.8`.
+By default, `/manga` maps to `./manga` on the host. To attach an existing library, change the left side of the volume mount, for example `D:/Media/Manga:/manga` or `/srv/manga:/manga`.
 
 ## Add a Series
 
@@ -113,4 +88,3 @@ Fields:
 
 - CBZ files are just ZIP files with images stored as `001.ext`, `002.ext`, and so on.
 - The app downloads one chapter at a time to keep requests gentle.
-- Set `TCB_REQUEST_DELAY` in `docker-compose.yml` to increase or reduce the delay between page/image requests.

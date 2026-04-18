@@ -1,23 +1,12 @@
-name: tcbscanner
-
 services:
   tcbscanner:
     image: ghcr.io/deepdaddyttv/tcbscanner:latest
-    container_name: ${TCBSCANNER_CONTAINER_NAME:-tcbscanner}
+    container_name: tcb_scanner
     restart: unless-stopped
     ports:
-      - "${TCBSCANNER_PORT:-18080}:8080"
-    environment:
-      TZ: ${TZ:-America/New_York}
-      DATA_DIR: /data
-      LIBRARY_DIR: /manga
-      WORK_DIR: /data/work
-      TCB_SCHEDULER_INTERVAL_HOURS: ${TCB_SCHEDULER_INTERVAL_HOURS:-1}
-      TCB_REQUEST_DELAY: ${TCB_REQUEST_DELAY:-0.8}
+      - 18080:8080
     volumes:
-      - type: bind
-        source: ${TCBSCANNER_DATA_DIR:-./data}
-        target: /data
-      - type: bind
-        source: ${TCBSCANNER_MANGA_DIR:-./manga}
-        target: /manga
+      - ./data:/data
+      - ./manga:/manga
+    environment:
+      TZ: "America/New_York"
