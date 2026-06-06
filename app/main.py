@@ -71,7 +71,7 @@ class SeriesCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     source_url: str = Field(min_length=1, max_length=500)
     folder: str = Field(default="", max_length=240)
-    check_interval_hours: int = Field(default=1, ge=1, le=168)
+    check_interval_hours: float = Field(default=0.5, ge=0.5, le=168)
     naming_format: str | None = Field(default=None, max_length=180)
     enabled: bool = True
     backfill_existing: bool = False
@@ -152,7 +152,7 @@ async def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
 @app.post("/api/series")
 async def create_series(payload: SeriesCreate) -> dict[str, Any]:
     data = payload.model_dump()
-    data["check_interval_minutes"] = data.pop("check_interval_hours") * 60
+    data["check_interval_minutes"] = int(round(float(data.pop("check_interval_hours")) * 60))
     if not data["folder"]:
         data["folder"] = data["title"]
     series = store.create_series(data)
@@ -188,7 +188,7 @@ async def set_naming_format(series_id: int, payload: NamingFormatUpdate) -> dict
 async def list_chapters(series_id: int) -> dict[str, Any]:
     if not store.get_series(series_id):
         raise HTTPException(status_code=404, detail="Series not found.")
-    return {"chapters": store.list_chapters(series_id)}
+    return {"chapters": [decorate_chapter(chapter) for chapter in store.list_chapters(series_id)]}
 
 
 @app.post("/api/series/{series_id}/check")
@@ -262,6 +262,34 @@ async def monitor_loop() -> None:
         except Exception as exc:  # noqa: BLE001 - keep the scheduler alive
             store.add_event(None, None, "error", f"Monitor loop error: {exc}")
         await asyncio.sleep(SCHEDULER_INTERVAL_HOURS * 3600)
+
+
+def decorate_chapter(chapter: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(chapter)
+    cbz_path = enriched.get("cbz_path")
+    if not cbz_path:
+        enriched["file_size_bytes"] = None
+        enriched["file_size_label"] = "—"
+        return enriched
+
+    try:
+        size_bytes = Path(str(cbz_path)).stat().st_size
+    except OSError:
+        size_bytes = None
+
+    enriched["file_size_bytes"] = size_bytes
+    enriched["file_size_label"] = format_file_size(size_bytes)
+    return enriched
+
+
+def format_file_size(size_bytes: int | None) -> str:
+    if not size_bytes:
+        return "—"
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes} B"
 
 
 def parse_datetime(value: object) -> datetime | None:

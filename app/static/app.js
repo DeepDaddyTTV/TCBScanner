@@ -12,11 +12,13 @@ const icons = {
   retry:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.2L13 11h8V3l-3.3 3.3Z"/></svg>',
   pirate:
-    '<svg viewBox="0 0 96 96" aria-hidden="true"><path d="M24 18 72 78M72 18 24 78" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><path d="M48 16c-14.4 0-26 10.7-26 24 0 9.7 6.2 18 15.2 21.8V72l6-3.8 5 3.8 5-3.8 6 3.8V61.8C67.8 58 74 49.7 74 40c0-13.3-11.6-24-26-24Zm-10 22a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm20 0a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm-18.6 16h17.2c-1.1 5.1-5 9-8.6 9s-7.5-3.9-8.6-9Z" fill="currentColor"/><path d="M28 22c4.8-6.5 11.8-10 20-10s15.2 3.5 20 10H28Z" fill="currentColor"/></svg>',
+    '<svg viewBox="0 0 128 128" aria-hidden="true"><path d="M26 30 54 63M102 30 74 63" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><path d="M19 104 54 63M109 104 74 63" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><circle cx="18" cy="29" r="7" fill="none" stroke="currentColor" stroke-width="6"/><circle cx="110" cy="29" r="7" fill="none" stroke="currentColor" stroke-width="6"/><circle cx="18" cy="104" r="7" fill="none" stroke="currentColor" stroke-width="6"/><circle cx="110" cy="104" r="7" fill="none" stroke="currentColor" stroke-width="6"/><path d="M64 25c-19 0-34 13.6-34 31 0 12.1 7.2 22.3 17.5 27.1V96l7.2-5 9.3 6 9.3-6 7.2 5V83.1C90.8 78.3 98 68.1 98 56c0-17.4-15-31-34-31Z" fill="currentColor"/><path d="M51 56.5c0 4.8 3.6 8.5 8 8.5s8-3.7 8-8.5c0-4.5-3.5-8.3-8-8.3s-8 3.8-8 8.3Zm20 0c0 4.8 3.6 8.5 8 8.5s8-3.7 8-8.5c0-4.5-3.5-8.3-8-8.3s-8 3.8-8 8.3Z" fill="#f7f3eb"/><path d="m64 63.5-5 8h10l-5-8Z" fill="#f7f3eb"/><path d="M52 78h24c-2 7.7-6.9 13.5-12 13.5S54 85.7 52 78Z" fill="#f7f3eb"/><path d="M40 31c4.4-10.2 14.3-16.5 24-16.5S83.6 20.8 88 31l-13.8-.6c-2.5-2.9-6.1-4.8-10.2-4.8s-7.7 1.9-10.2 4.8L40 31Z" fill="#e2d0a6"/><path d="M33 32c7.8-8.2 18.8-12.8 31-12.8S87.2 23.8 95 32v5.8H33V32Z" fill="#e0c983"/><path d="M27 38h74c0 4.8-3.9 8.2-8.6 8.2H35.6C30.9 46.2 27 42.8 27 38Z" fill="#1c1713"/></svg>',
   moon:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a6 6 0 0 0 5.2-9A7.5 7.5 0 1 1 9 17.7 6 6 0 0 0 12 18Z"/></svg>',
   sun:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2h2v3h-2V2Zm0 17h2v3h-2v-3ZM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1Zm12.1 12.1 1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1ZM2 11h3v2H2v-2Zm17 0h3v2h-3v-2ZM5.6 19.8l-1.4-1.4 2.1-2.1 1.4 1.4-2.1 2.1ZM18.4 4.2l1.4 1.4-2.1 2.1-1.4-1.4 2.1-2.1ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg>',
+  chevronDown:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 const CHAPTER_FILTERS = [
@@ -429,7 +431,7 @@ function renderSettings() {
   const seriesForm = $("#seriesForm");
   if (seriesForm?.elements.naming_format) {
     seriesForm.elements.naming_format.placeholder =
-      state.settings.default_naming_format || "{ChapterFullTitle}";
+      "{title} - c{chapter} - {title} [{scanlators}].cbz";
   }
 
   const variables = $("#namingVariables");
@@ -539,7 +541,7 @@ function renderSeries() {
             </div>
 
             <div class="series-meta">
-              <span>${escapeHtml(formatInterval(series.check_interval_minutes))}</span>
+              <span>${escapeHtml(formatCadence(series.check_interval_minutes))}</span>
               <span>${escapeHtml(formatRelativeTime(series.last_checked_at))}</span>
             </div>
 
@@ -585,9 +587,11 @@ function renderSeriesFocus() {
   const artStyle = heroUrl ? ` style="--focus-art: url('${heroUrl.replaceAll("'", "%27")}')"` : "";
   const namingPreview = getNamingPreview(selected);
   const sourceDisplay = formatSourceDisplay(selected.source_url);
+  const folderDisplay = formatFolderDisplay(selected.folder || selected.title);
 
   panel.innerHTML = `
     <div class="focus-hero" data-series-id="${selected.id}"${artStyle}>
+      <div class="focus-watermark" aria-hidden="true"></div>
       <div class="focus-banner">
         <div class="focus-emblem" aria-hidden="true">${icons.pirate}</div>
         <div class="focus-copy">
@@ -602,12 +606,11 @@ function renderSeriesFocus() {
             </a>
           </p>
           <div class="focus-detail-grid">
-            <span><strong>Library:</strong>${escapeHtml(selected.title)}</span>
-            <span><strong>Folder:</strong>${escapeHtml(selected.folder || selected.title)}</span>
-            <span><strong>Interval:</strong>${escapeHtml(formatInterval(selected.check_interval_minutes))}</span>
-            <span><strong>Last sync:</strong>${escapeHtml(formatRelativeTime(selected.last_checked_at))}</span>
+            <span><strong>Library:</strong><em>${escapeHtml(selected.title)}</em></span>
+            <span><strong>Folder:</strong><em>${escapeHtml(folderDisplay)}</em></span>
+            <span><strong>Interval:</strong><em>${escapeHtml(formatInterval(selected.check_interval_minutes))}</em></span>
           </div>
-          <p class="focus-detail focus-detail-naming"><strong>Naming:</strong>${escapeHtml(namingPreview)}</p>
+          <p class="focus-detail focus-detail-naming"><strong>Naming:</strong><span>${escapeHtml(namingPreview)}</span></p>
           <div class="focus-tabs" aria-label="Series workspace sections">
             <button class="focus-tab active" type="button">Chapters</button>
             <button class="focus-tab" type="button">Details</button>
@@ -619,7 +622,7 @@ function renderSeriesFocus() {
         <div class="focus-art" aria-hidden="true"></div>
       </div>
 
-      <div class="focus-actions" data-series-id="${selected.id}">
+      <div class="focus-actions sr-only" data-series-id="${selected.id}">
         <label class="monitor-toggle compact">
           <input type="checkbox" data-action="monitor" ${selected.enabled ? "checked" : ""} />
           <span>${selected.enabled ? "Monitor new chapters automatically" : "Series is currently paused"}</span>
@@ -637,8 +640,18 @@ function renderSeriesFocus() {
 
 function getNamingPreview(series) {
   const raw = series?.naming_format || state.settings.default_naming_format || "";
+  const conceptPreview = `${series?.title || "{series}"} - c{chapter} - {title} [{scanlators}].cbz`;
   if (!raw || raw === "{ChapterFullTitle}") {
-    return `${series?.title || "{series}"} - Chapter {chapter} - {title}.cbz`;
+    return conceptPreview;
+  }
+
+  if (
+    raw.includes("{SeriesName}") ||
+    raw.includes("{SeriesTitle}") ||
+    raw.includes("{ChapterNumberPadded}") ||
+    raw.includes("{ChapterNumber}")
+  ) {
+    return conceptPreview;
   }
 
   const preview = String(raw)
@@ -674,10 +687,23 @@ function formatVariableToken(name) {
 
 function formatSourceDisplay(url) {
   try {
-    return new URL(url).origin;
+    return `https://${cleanHost(new URL(url).host)}`;
   } catch {
     return url;
   }
+}
+
+function cleanHost(host) {
+  return String(host || "")
+    .replace(/^www\./i, "")
+    .replace(/^tcb(?=[a-z])/i, "");
+}
+
+function formatFolderDisplay(folder) {
+  const value = String(folder || "").trim();
+  if (!value) return "D:\\Manga\\Series";
+  if (/[\\/]/.test(value)) return value;
+  return `D:\\Manga\\${value}`;
 }
 
 function renderFilters() {
@@ -869,19 +895,24 @@ function renderEvents() {
 
   list.innerHTML = state.events
     .map(
-      (event) => `
-        <article class="event-row ${escapeHtml(event.level)}">
+      (event) => {
+        const tone = eventTone(event);
+        const summary = summarizeEvent(event);
+        return `
+        <article class="event-row tone-${escapeHtml(tone)} ${escapeHtml(event.level)}">
           <time class="event-time">
             <strong>${escapeHtml(formatRelativeTime(event.created_at))}</strong>
             <span>${escapeHtml(formatDate(event.created_at))}</span>
           </time>
           <span class="event-dot"></span>
           <div class="event-copy">
-            <p>${escapeHtml(event.message)}</p>
+            <strong>${escapeHtml(summary.title)}</strong>
+            ${summary.detail ? `<span>${escapeHtml(summary.detail)}</span>` : ""}
           </div>
           <span class="event-more" aria-hidden="true"></span>
         </article>
-      `,
+      `;
+      },
     )
     .join("");
 }
@@ -906,9 +937,92 @@ function renderSelectionTools() {
   $("#selectedCount").textContent = `${selectedCount} selected`;
 
   dock.classList.toggle("hidden", !selectedCount);
-  $("#selectionDockCount").textContent = `${selectedCount} chapter${selectedCount === 1 ? "" : "s"} selected`;
+  $("#selectionDockCount").textContent = `${selectedCount} selected`;
   $("#clearSelectedChaptersDock").disabled = !selectedCount;
   $("#queueSelectedChaptersDock").disabled = !selectedCount;
+}
+
+function summarizeEvent(event) {
+  const raw = String(event.message || "").trim();
+  const normalized = raw.toLowerCase();
+  const chapterDetail = event.chapter_title
+    ? composeEventDetail(event.series_title, trimSeriesPrefix(event.series_title, event.chapter_title))
+    : event.series_title || raw;
+
+  if (normalized.includes("no new chapters")) {
+    return {
+      title: "No new chapters",
+      detail: event.series_title || raw,
+    };
+  }
+
+  if (normalized.includes("queued")) {
+    return {
+      title: "Queued chapter",
+      detail: chapterDetail,
+    };
+  }
+
+  if (normalized.includes("downloaded")) {
+    return {
+      title: "Downloaded",
+      detail: chapterDetail,
+    };
+  }
+
+  if (normalized.includes("failed")) {
+    return {
+      title: "Failed to download",
+      detail: chapterDetail || raw,
+    };
+  }
+
+  if (normalized.includes("series added")) {
+    return {
+      title: "Series added",
+      detail: event.series_title || raw,
+    };
+  }
+
+  if (normalized.includes("monitoring")) {
+    return {
+      title: raw.replace(/\.$/, ""),
+      detail: event.series_title || "",
+    };
+  }
+
+  return {
+    title: raw || "Scanner update",
+    detail: event.series_title || "",
+  };
+}
+
+function trimSeriesPrefix(seriesTitle, chapterTitle) {
+  const full = String(chapterTitle || "").trim();
+  const prefix = String(seriesTitle || "").trim().toLowerCase();
+  if (!prefix || !full.toLowerCase().startsWith(prefix)) {
+    return full;
+  }
+  return full
+    .slice(String(seriesTitle || "").trim().length)
+    .trim()
+    .replace(/^chapter\s+/i, "c");
+}
+
+function composeEventDetail(seriesTitle, chapterDetail) {
+  const series = String(seriesTitle || "").trim();
+  const chapter = String(chapterDetail || "").trim();
+  if (series && chapter) return `${series} - ${chapter}`;
+  return series || chapter;
+}
+
+function eventTone(event) {
+  const normalized = String(event.message || "").toLowerCase();
+  if (event.level === "error" || normalized.includes("failed")) return "failed";
+  if (normalized.includes("queued")) return "queued";
+  if (normalized.includes("downloaded")) return "downloaded";
+  if (normalized.includes("found") || normalized.includes("discovered") || normalized.includes("no new chapters")) return "found";
+  return "info";
 }
 
 function toggleChapterBulkMenu(force) {
@@ -1012,7 +1126,7 @@ function setTheme(theme) {
   document.documentElement.dataset.theme = normalized;
   localStorage.setItem(themeKey, normalized);
   const button = $("#themeToggle");
-  button.innerHTML = `${normalized === "dark" ? icons.sun : icons.moon}<span>Theme</span>`;
+  button.innerHTML = `${normalized === "dark" ? icons.sun : icons.moon}<span>Theme</span>${icons.chevronDown}`;
   button.title = normalized === "dark" ? "Use light mode" : "Use dark mode";
   button.setAttribute("aria-label", button.title);
 }
@@ -1099,7 +1213,7 @@ function seriesMark(title) {
 
 function getHostLabel(url) {
   try {
-    return new URL(url).host;
+    return cleanHost(new URL(url).host);
   } catch {
     return url;
   }
@@ -1112,12 +1226,20 @@ function fileNameFromPath(value) {
 function formatInterval(minutes) {
   const totalMinutes = Number(minutes || 0);
   if (!totalMinutes) return "Manual cadence";
-  const hours = totalMinutes / 60;
-  if (hours < 24) {
-    return `${hours}h cadence`;
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
   }
-  const days = hours / 24;
-  return `${days}d cadence`;
+  if (totalMinutes < 1440) {
+    const hours = totalMinutes / 60;
+    return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
+  }
+  const days = totalMinutes / 1440;
+  return `${Number.isInteger(days) ? days : days.toFixed(1)}d`;
+}
+
+function formatCadence(minutes) {
+  const label = formatInterval(minutes);
+  return label === "Manual cadence" ? label : `${label} cadence`;
 }
 
 function getNextScanLabel() {
@@ -1256,7 +1378,7 @@ listen($("#seriesForm"), "submit", async (event) => {
     source_url: String(form.get("source_url") || ""),
     title: String(form.get("title") || ""),
     folder: String(form.get("folder") || ""),
-    check_interval_hours: Number(form.get("check_interval_hours") || 1),
+    check_interval_hours: Number(form.get("check_interval_hours") || 0.5),
     naming_format: String(form.get("naming_format") || "").trim() || null,
     enabled: form.get("enabled") === "on",
     backfill_existing: form.get("backfill_existing") === "on",
@@ -1269,7 +1391,7 @@ listen($("#seriesForm"), "submit", async (event) => {
 
   event.currentTarget.reset();
   event.currentTarget.elements.enabled.checked = true;
-  event.currentTarget.elements.check_interval_hours.value = 1;
+  event.currentTarget.elements.check_interval_hours.value = 0.5;
   setNotice(`Tracking ${payload.title}.`, "success");
   await refreshAll({ quiet: true });
 });

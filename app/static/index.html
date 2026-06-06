@@ -10,7 +10,7 @@
         document.documentElement.dataset.theme = saved || "light";
       })();
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260606g" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260606h" />
   </head>
   <body>
     <main class="app-shell">
@@ -58,43 +58,44 @@
           </div>
         </aside>
 
-        <section class="main-stage" id="chaptersSection" aria-label="Queue workspace">
-          <header class="panel command-bar">
-            <div class="command-primary">
-              <button class="toolbar-text-button refresh-button" id="refreshAll" title="Refresh dashboard" aria-label="Refresh dashboard">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14.9 4H2.8l3.4 3.4L9.7 16H7.5A6 6 0 1 0 6 12H4a8 8 0 1 1 16 0Z"/></svg>
-                <span>Refresh now</span>
-              </button>
-              <div class="command-copy">
-                <h2>Chapter queue</h2>
-                <p id="shellStatus">Loading scanner state…</p>
-              </div>
+        <header class="panel command-bar">
+          <div class="command-primary">
+            <button class="toolbar-text-button refresh-button" id="refreshAll" title="Refresh dashboard" aria-label="Refresh dashboard">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14.9 4H2.8l3.4 3.4L9.7 16H7.5A6 6 0 1 0 6 12H4a8 8 0 1 1 16 0Z"/></svg>
+              <span>Refresh now</span>
+            </button>
+            <div class="command-copy">
+              <h2>Chapter queue</h2>
+              <p id="shellStatus">Loading scanner state…</p>
+            </div>
+          </div>
+
+          <div class="command-meta">
+            <div class="sync-badge">
+              <span>Last sync</span>
+              <strong id="lastSync">Starting…</strong>
             </div>
 
-            <div class="command-meta">
-              <div class="sync-badge">
-                <span>Last sync</span>
-                <strong id="lastSync">Starting…</strong>
-              </div>
+            <div class="topbar-actions">
+              <button class="toolbar-text-button" id="optionsToggle" title="Global options" aria-label="Global options" aria-expanded="false" aria-controls="optionsPanel">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13.5.1-1.5-.1-1.5 2-1.5-2-3.5-2.4 1a9 9 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A9 9 0 0 0 7 6L4.6 5 2.6 8.5l2 1.5L4.5 12l.1 1.5-2 1.5 2 3.5 2.4-1a9 9 0 0 0 2.6 1.5L10 22h4l.4-2.5a9 9 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
+                <span>Settings</span>
+              </button>
+              <button class="toolbar-text-button theme-button" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a6 6 0 0 0 5.2-9A7.5 7.5 0 1 1 9 17.7 6 6 0 0 0 12 18Z"/></svg>
+                <span>Theme</span>
+              </button>
+            </div>
 
-                <div class="topbar-actions">
-                  <button class="toolbar-text-button" id="optionsToggle" title="Global options" aria-label="Global options" aria-expanded="false" aria-controls="optionsPanel">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13.5.1-1.5-.1-1.5 2-1.5-2-3.5-2.4 1a9 9 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A9 9 0 0 0 7 6L4.6 5 2.6 8.5l2 1.5L4.5 12l.1 1.5-2 1.5 2 3.5 2.4-1a9 9 0 0 0 2.6 1.5L10 22h4l.4-2.5a9 9 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
-                  <span>Settings</span>
-                </button>
-                  <button class="toolbar-text-button" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a6 6 0 0 0 5.2-9A7.5 7.5 0 1 1 9 17.7 6 6 0 0 0 12 18Z"/></svg>
-                    <span>Theme</span>
-                  </button>
-                </div>
+            <div class="window-actions" aria-hidden="true">
+              <button class="window-button" type="button"><span></span></button>
+              <button class="window-button" type="button"><span></span></button>
+              <button class="window-button" type="button"><span></span></button>
+            </div>
+          </div>
+        </header>
 
-                <div class="window-actions" aria-hidden="true">
-                  <button class="window-button" type="button"><span></span></button>
-                  <button class="window-button" type="button"><span></span></button>
-                  <button class="window-button" type="button"><span></span></button>
-                </div>
-              </div>
-            </header>
+        <section class="main-stage" id="chaptersSection" aria-label="Queue workspace">
 
           <div class="notice-bar hidden" id="noticeBar" role="status" aria-live="polite"></div>
 
@@ -160,6 +161,7 @@
                   <h2>Add new series</h2>
                   <p>Point the scanner at a supported title page and choose how it should archive new chapters.</p>
                 </div>
+                <button class="window-button panel-window-button" type="button" aria-hidden="true"><span></span></button>
               </div>
 
               <form class="series-form" id="seriesForm">
@@ -178,7 +180,9 @@
                 <label class="field-span">
                   <span>Check interval</span>
                   <select name="check_interval_hours">
-                    <option value="1" selected>1 hour</option>
+                    <option value="0.5" selected>30 minutes</option>
+                    <option value="1">1 hour</option>
+                    <option value="2">2 hours</option>
                     <option value="6">6 hours</option>
                     <option value="12">12 hours</option>
                     <option value="24">24 hours</option>
@@ -230,7 +234,7 @@
             <section class="panel activity-panel" id="activitySection" aria-label="Activity">
               <div class="panel-heading">
                 <div>
-                  <h2>Activity log</h2>
+                  <h2>Activity feed</h2>
                   <p>Recent checks, downloads, and failures from the worker.</p>
                 </div>
                 <span class="panel-badge" id="activityStatus">Live</span>
@@ -239,19 +243,20 @@
             </section>
           </div>
         </aside>
+
+        <footer class="status-strip" id="statusStrip" aria-live="polite">
+          <span id="statusPrimary">Engine idle</span>
+          <span id="statusSecondary">Next scan pending</span>
+        </footer>
       </div>
 
       <nav class="mobile-dock" aria-label="Jump between dashboard sections">
         <a href="#librarySection">Library</a>
-        <a href="#chaptersSection">Queue</a>
-        <a href="#toolsSection">Add</a>
         <a href="#activitySection">Activity</a>
+        <a href="#toolsSection">Add Series</a>
+        <a href="#chaptersSection">Settings</a>
       </nav>
-      <footer class="status-strip" id="statusStrip" aria-live="polite">
-        <span id="statusPrimary">Engine idle</span>
-        <span id="statusSecondary">Next scan pending</span>
-      </footer>
     </main>
-    <script src="/static/app.js?v=20260606g"></script>
+    <script src="/static/app.js?v=20260606h"></script>
   </body>
 </html>
