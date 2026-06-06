@@ -51,7 +51,7 @@ Compose settings:
 - `user`: Runs the container as `root` by default so mounted manga folders can be written even when the host folder owner does not match a container user.
 - `ports`: Maps the host web port to the container web port. `18080:8080` makes the app available at `http://localhost:18080`.
 - `./data:/data`: Stores the SQLite database and temporary download work files.
-- `./manga:/manga`: Stores finished CBZ files. Change the left side to attach an existing manga library, for example `D:/Media/Manga:/manga` or `/srv/manga:/manga`.
+- `./manga:/manga`: Stores finished CBZ files. Change the left side to attach an existing manga library, for example `D:/Manga:/manga` or `/srv/manga:/manga`.
 - `TZ`: Time zone used by the container for logs and scheduled checks.
 
 Supported environment variables:

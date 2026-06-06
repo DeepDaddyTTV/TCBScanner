@@ -3,120 +3,255 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TCBScanner</title>
+    <title>TCB Scanner</title>
     <script>
       (() => {
-        const saved = localStorage.getItem("tcbscanner-theme");
-        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
+        const saved = localStorage.getItem("tcbscanner-theme-v2");
+        document.documentElement.dataset.theme = saved || "light";
       })();
     </script>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260606g" />
   </head>
   <body>
     <main class="app-shell">
-      <section class="workspace">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">TCBScanner</p>
-            <h1>Manga CBZ queue</h1>
+      <div class="app-frame">
+        <aside class="library-rail" id="librarySection" aria-label="Tracked library">
+          <div class="rail-scroll">
+            <section class="brand-panel" id="brandPanel">
+              <div class="brand-block">
+                <div class="brand-wordmark" aria-label="TCB Scanner">
+                  <span class="brand-wordmark-tcb">TCB</span>
+                  <span class="brand-wordmark-scanner">Scanner</span>
+                </div>
+                <div class="brand-copy">
+                  <p>Manga chapter monitor &amp; CBZ download manager</p>
+                  <span>スキャン・ダウンロード・管理</span>
+                </div>
+              </div>
+              <div class="brand-illustration" id="brandIllustration" aria-hidden="true"></div>
+            </section>
+
+            <section class="panel overview-panel" aria-label="Library overview">
+              <div class="panel-heading">
+                <div>
+                  <h2>Library overview</h2>
+                  <p>How the archive is behaving right now.</p>
+                </div>
+                <span class="panel-badge" id="seriesCount">0 tracked</span>
+              </div>
+              <div class="overview-stats" id="overviewStats"></div>
+              <div class="overview-breakdown" id="libraryBreakdown"></div>
+            </section>
+
+            <section class="panel series-panel" aria-label="Tracked series">
+              <div class="panel-heading">
+                <div>
+                  <h2>Tracked series</h2>
+                  <p>Select a title to inspect its queue.</p>
+                </div>
+                <a class="icon-button" href="#toolsSection" aria-label="Jump to add series">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+                </a>
+              </div>
+              <div class="series-list" id="seriesList"></div>
+            </section>
           </div>
-          <div class="topbar-actions">
-            <button class="icon-button" id="optionsToggle" title="Options" aria-label="Options">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13.5.1-1.5-.1-1.5 2-1.5-2-3.5-2.4 1a9 9 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A9 9 0 0 0 7 6L4.6 5 2.6 8.5l2 1.5L4.5 12l.1 1.5-2 1.5 2 3.5 2.4-1a9 9 0 0 0 2.6 1.5L10 22h4l.4-2.5a9 9 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
-            </button>
-            <button class="icon-button" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a6 6 0 0 0 5.2-9A7.5 7.5 0 1 1 9 17.7 6 6 0 0 0 12 18Z"/></svg>
-            </button>
-            <button class="icon-button" id="refreshAll" title="Refresh dashboard" aria-label="Refresh dashboard">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14.9 4H2.8l3.4 3.4L9.7 16H7.5A6 6 0 1 0 6 12H4a8 8 0 1 1 16 0Z"/></svg>
-            </button>
-          </div>
-        </header>
+        </aside>
 
-        <section class="options-panel hidden" id="optionsPanel" aria-label="Options">
-          <form class="options-form" id="optionsForm">
-            <label>
-              <span>Default naming format</span>
-              <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
-            </label>
-            <button class="primary-action" type="submit">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM12 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm3-10H5V5h10v4Z"/></svg>
-              <span>Save options</span>
-            </button>
-            <div class="variable-list" id="namingVariables"></div>
-          </form>
-        </section>
-
-        <section class="setup-panel" aria-label="Add series">
-          <form id="seriesForm">
-            <label>
-              <span>Source URL</span>
-              <input name="source_url" type="url" required placeholder="https://tcbonepiecechapters.com/mangas/5/one-piece" />
-            </label>
-            <label>
-              <span>Library title</span>
-              <input name="title" type="text" required placeholder="One Piece" />
-            </label>
-            <label>
-              <span>Folder</span>
-              <input name="folder" type="text" placeholder="One Piece" />
-            </label>
-            <label>
-              <span>Check interval (hours)</span>
-              <input name="check_interval_hours" type="number" min="1" max="168" value="1" />
-            </label>
-            <label class="toggle-line">
-              <input name="backfill_existing" type="checkbox" />
-              <span>Download all found chapters</span>
-            </label>
-            <label class="toggle-line">
-              <input name="enabled" type="checkbox" checked />
-              <span>Monitor new chapters</span>
-            </label>
-            <button class="primary-action" type="submit">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
-              <span>Scan series</span>
-            </button>
-          </form>
-        </section>
-
-        <section class="content-grid">
-          <section class="series-region" aria-label="Series">
-            <div class="section-heading">
-              <h2>Series</h2>
-              <span id="seriesCount">0 tracked</span>
-            </div>
-            <div class="series-list" id="seriesList"></div>
-          </section>
-
-          <section class="chapter-region" aria-label="Chapters">
-            <div class="section-heading">
-              <h2 id="chapterTitle">Chapters</h2>
-              <span id="chapterCount">Select a series</span>
-            </div>
-            <div class="chapter-tools" id="chapterTools">
-              <button class="small-action" id="selectVisibleChapters" type="button">Select found</button>
-              <button class="small-action" id="clearSelectedChapters" type="button">Clear</button>
-              <button class="small-action" id="queueSelectedChapters" type="button">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v8l3.3-3.3 1.4 1.4L12 15.8 6.3 10.1l1.4-1.4L11 12V4Zm-5 14h12v2H6v-2Z"/></svg>
-                <span>Queue selected</span>
+        <section class="main-stage" id="chaptersSection" aria-label="Queue workspace">
+          <header class="panel command-bar">
+            <div class="command-primary">
+              <button class="toolbar-text-button refresh-button" id="refreshAll" title="Refresh dashboard" aria-label="Refresh dashboard">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14.9 4H2.8l3.4 3.4L9.7 16H7.5A6 6 0 1 0 6 12H4a8 8 0 1 1 16 0Z"/></svg>
+                <span>Refresh now</span>
               </button>
-              <span id="selectedCount">0 selected</span>
+              <div class="command-copy">
+                <h2>Chapter queue</h2>
+                <p id="shellStatus">Loading scanner state…</p>
+              </div>
             </div>
-            <div class="chapter-list" id="chapterList"></div>
-          </section>
 
-          <section class="activity-region" aria-label="Activity">
-            <div class="section-heading">
-              <h2>Activity</h2>
-              <span id="activityStatus">Live</span>
+            <div class="command-meta">
+              <div class="sync-badge">
+                <span>Last sync</span>
+                <strong id="lastSync">Starting…</strong>
+              </div>
+
+                <div class="topbar-actions">
+                  <button class="toolbar-text-button" id="optionsToggle" title="Global options" aria-label="Global options" aria-expanded="false" aria-controls="optionsPanel">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13.5.1-1.5-.1-1.5 2-1.5-2-3.5-2.4 1a9 9 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A9 9 0 0 0 7 6L4.6 5 2.6 8.5l2 1.5L4.5 12l.1 1.5-2 1.5 2 3.5 2.4-1a9 9 0 0 0 2.6 1.5L10 22h4l.4-2.5a9 9 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
+                  <span>Settings</span>
+                </button>
+                  <button class="toolbar-text-button" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a6 6 0 0 0 5.2-9A7.5 7.5 0 1 1 9 17.7 6 6 0 0 0 12 18Z"/></svg>
+                    <span>Theme</span>
+                  </button>
+                </div>
+
+                <div class="window-actions" aria-hidden="true">
+                  <button class="window-button" type="button"><span></span></button>
+                  <button class="window-button" type="button"><span></span></button>
+                  <button class="window-button" type="button"><span></span></button>
+                </div>
+              </div>
+            </header>
+
+          <div class="notice-bar hidden" id="noticeBar" role="status" aria-live="polite"></div>
+
+          <section class="panel series-focus" id="selectedSeriesPanel" aria-label="Selected series"></section>
+
+          <section class="panel chapter-panel" aria-label="Chapter queue">
+            <div class="chapter-panel-top">
+              <div class="chapter-toolbar-line">
+                <div class="filter-row" id="chapterFilters"></div>
+                <div class="chapter-tools" id="chapterTools">
+                  <button class="small-action bulk-action-button" id="bulkActionsToggle" type="button" aria-expanded="false" aria-controls="chapterBulkMenu">
+                    <span>Bulk Actions</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <div class="chapter-bulk-menu hidden" id="chapterBulkMenu">
+                    <button class="small-action" id="selectVisibleChapters" type="button">Select visible</button>
+                    <button class="small-action" id="clearSelectedChapters" type="button">Clear</button>
+                    <button class="small-action strong-action" id="queueSelectedChapters" type="button">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v8l3.3-3.3 1.4 1.4L12 15.8 6.3 10.1l1.4-1.4L11 12V4Zm-5 14h12v2H6v-2Z"/></svg>
+                      <span>Queue selected</span>
+                    </button>
+                    <span class="tool-count" id="selectedCount">0 selected</span>
+                  </div>
+                </div>
+              </div>
+              <p class="chapter-summary" id="chapterCount">Select a series to see the queue.</p>
             </div>
-            <div class="event-list" id="eventList"></div>
+
+            <div class="chapter-list-wrap">
+              <div class="chapter-list-head hidden" id="chapterListHead" aria-hidden="true">
+                <span>Select</span>
+                <span>Chapter</span>
+                <span>Title</span>
+                <span>Status</span>
+                <span>Added</span>
+                <span>Size</span>
+                <span>Action</span>
+              </div>
+              <div class="chapter-list" id="chapterList"></div>
+            </div>
+
+            <div class="selection-dock hidden" id="selectionDock" aria-live="polite">
+              <div>
+                <p>Selection ready</p>
+                <strong id="selectionDockCount">0 chapters selected</strong>
+              </div>
+              <div class="selection-dock-actions">
+                <button class="small-action" id="clearSelectedChaptersDock" type="button">Clear</button>
+                <button class="primary-action" id="queueSelectedChaptersDock" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v8l3.3-3.3 1.4 1.4L12 15.8 6.3 10.1l1.4-1.4L11 12V4Zm-5 14h12v2H6v-2Z"/></svg>
+                  <span>Queue selected</span>
+                </button>
+              </div>
+            </div>
           </section>
         </section>
-      </section>
+
+        <aside class="utility-rail" id="toolsSection" aria-label="Scanner tools">
+          <div class="rail-scroll">
+            <section class="panel setup-panel" aria-label="Add series">
+              <div class="panel-heading">
+                <div>
+                  <h2>Add new series</h2>
+                  <p>Point the scanner at a supported title page and choose how it should archive new chapters.</p>
+                </div>
+              </div>
+
+              <form class="series-form" id="seriesForm">
+                <label class="field-span">
+                  <span>Source URL</span>
+                  <input name="source_url" type="url" required placeholder="https://example.com/manga" />
+                </label>
+                <label class="field-span">
+                  <span>Library title</span>
+                  <input name="title" type="text" required placeholder="e.g. My Hero Academia" />
+                </label>
+                <label class="field-span">
+                  <span>Save Folder</span>
+                  <input name="folder" type="text" placeholder="D:\\Manga\\My Hero Academia" />
+                </label>
+                <label class="field-span">
+                  <span>Check interval</span>
+                  <select name="check_interval_hours">
+                    <option value="1" selected>1 hour</option>
+                    <option value="6">6 hours</option>
+                    <option value="12">12 hours</option>
+                    <option value="24">24 hours</option>
+                    <option value="48">48 hours</option>
+                    <option value="72">72 hours</option>
+                    <option value="168">1 week</option>
+                  </select>
+                </label>
+                <label class="field-span">
+                  <span>Naming format</span>
+                  <input name="naming_format" type="text" placeholder="{title} - c{chapter} - {title} [{scanlators}].cbz" />
+                </label>
+                <div class="variable-list compact field-span" id="seriesNamingVariables"></div>
+                <label class="toggle-line">
+                  <input name="backfill_existing" type="checkbox" />
+                  <span>Download every chapter already listed on first scan</span>
+                </label>
+                <label class="toggle-line">
+                  <input name="enabled" type="checkbox" checked />
+                  <span>Keep monitoring this series for new chapters</span>
+                </label>
+                <button class="primary-action field-span" type="submit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+                  <span>Track series</span>
+                </button>
+              </form>
+            </section>
+
+            <section class="panel options-panel hidden" id="optionsPanel" aria-label="Global options">
+              <div class="panel-heading">
+                <div>
+                  <h2>Global naming defaults</h2>
+                  <p>Set the template new series should inherit before custom overrides are applied.</p>
+                </div>
+              </div>
+              <form class="options-form" id="optionsForm">
+                <label class="field-span">
+                  <span>Default naming format</span>
+                  <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
+                </label>
+                <button class="primary-action" type="submit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM12 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm3-10H5V5h10v4Z"/></svg>
+                  <span>Save defaults</span>
+                </button>
+                <div class="variable-list field-span" id="namingVariables"></div>
+              </form>
+            </section>
+
+            <section class="panel activity-panel" id="activitySection" aria-label="Activity">
+              <div class="panel-heading">
+                <div>
+                  <h2>Activity log</h2>
+                  <p>Recent checks, downloads, and failures from the worker.</p>
+                </div>
+                <span class="panel-badge" id="activityStatus">Live</span>
+              </div>
+              <div class="event-list" id="eventList"></div>
+            </section>
+          </div>
+        </aside>
+      </div>
+
+      <nav class="mobile-dock" aria-label="Jump between dashboard sections">
+        <a href="#librarySection">Library</a>
+        <a href="#chaptersSection">Queue</a>
+        <a href="#toolsSection">Add</a>
+        <a href="#activitySection">Activity</a>
+      </nav>
+      <footer class="status-strip" id="statusStrip" aria-live="polite">
+        <span id="statusPrimary">Engine idle</span>
+        <span id="statusSecondary">Next scan pending</span>
+      </footer>
     </main>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260606g"></script>
   </body>
 </html>

@@ -3,22 +3,57 @@ const icons = {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6a6 6 0 1 1-5.2 9H4.6A8 8 0 1 0 4 12H1l4-4 4 4H6a6 6 0 0 1 6-6Z"/></svg>',
   download:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v8l3.3-3.3 1.4 1.4L12 15.8 6.3 10.1l1.4-1.4L11 12V4Zm-5 14h12v2H6v-2Z"/></svg>',
+  folder:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Zm0 3v9h18V9H3Z"/></svg>',
   pause:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7V5Zm6 0h4v14h-4V5Z"/></svg>',
-  play:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5Z"/></svg>',
   trash:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.8 11H7.8L7 9Z"/></svg>',
   retry:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.2L13 11h8V3l-3.3 3.3Z"/></svg>',
+  pirate:
+    '<svg viewBox="0 0 96 96" aria-hidden="true"><path d="M24 18 72 78M72 18 24 78" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><path d="M48 16c-14.4 0-26 10.7-26 24 0 9.7 6.2 18 15.2 21.8V72l6-3.8 5 3.8 5-3.8 6 3.8V61.8C67.8 58 74 49.7 74 40c0-13.3-11.6-24-26-24Zm-10 22a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm20 0a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm-18.6 16h17.2c-1.1 5.1-5 9-8.6 9s-7.5-3.9-8.6-9Z" fill="currentColor"/><path d="M28 22c4.8-6.5 11.8-10 20-10s15.2 3.5 20 10H28Z" fill="currentColor"/></svg>',
   moon:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18a6 6 0 0 0 5.2-9A7.5 7.5 0 1 1 9 17.7 6 6 0 0 0 12 18Z"/></svg>',
   sun:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2h2v3h-2V2Zm0 17h2v3h-2v-3ZM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1Zm12.1 12.1 1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1ZM2 11h3v2H2v-2Zm17 0h3v2h-3v-2ZM5.6 19.8l-1.4-1.4 2.1-2.1 1.4 1.4-2.1 2.1ZM18.4 4.2l1.4 1.4-2.1 2.1-1.4-1.4 2.1-2.1ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg>',
 };
 
+const CHAPTER_FILTERS = [
+  {
+    id: "all",
+    label: "All",
+    matches: () => true,
+  },
+  {
+    id: "found",
+    label: "Found",
+    matches: (chapter) => chapter.status === "skipped",
+  },
+  {
+    id: "queued",
+    label: "Queued",
+    matches: (chapter) => chapter.status === "pending" || chapter.status === "downloading",
+  },
+  {
+    id: "downloaded",
+    label: "Downloaded",
+    matches: (chapter) => chapter.status === "downloaded",
+  },
+  {
+    id: "failed",
+    label: "Failed",
+    matches: (chapter) => chapter.status === "failed",
+  },
+];
+
+const JIKAN_API_BASE = "https://api.jikan.moe/v4";
+const ART_CACHE_KEY = "tcbscanner-jikan-art-v3";
+const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
+
 const state = {
   series: [],
+  events: [],
   selectedSeriesId: null,
   chapters: [],
   selectedChapterIds: new Set(),
@@ -26,10 +61,20 @@ const state = {
     default_naming_format: "{ChapterFullTitle}",
     variables: [],
   },
+  chapterFilter: "all",
+  chapterBulkOpen: false,
+  lastRefreshAt: null,
+  isRefreshing: false,
+  seriesArt: {},
+  artRequests: new Set(),
 };
 
 const $ = (selector) => document.querySelector(selector);
-const themeKey = "tcbscanner-theme";
+const themeKey = "tcbscanner-theme-v2";
+const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+let noticeTimer = null;
+let artQueue = Promise.resolve();
+state.seriesArt = loadArtCache();
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -43,212 +88,798 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-async function refreshAll() {
-  await loadSettings();
-  await loadSeries();
-  if (state.selectedSeriesId) {
-    await loadChapters(state.selectedSeriesId);
+function loadArtCache() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ART_CACHE_KEY) || "{}");
+    const now = Date.now();
+    const entries = Object.entries(parsed).filter(([, value]) => {
+      const cachedAt = Number(value?.cached_at || 0);
+      return cachedAt && now - cachedAt < ART_CACHE_TTL_MS;
+    });
+    return Object.fromEntries(entries);
+  } catch {
+    return {};
   }
-  await loadEvents();
 }
 
-async function loadSettings() {
-  const data = await api("/api/settings");
-  state.settings = data;
-  renderSettings();
+function persistArtCache() {
+  try {
+    localStorage.setItem(ART_CACHE_KEY, JSON.stringify(state.seriesArt));
+  } catch {
+    console.warn("Unable to persist artwork cache.");
+  }
 }
 
-async function loadSeries() {
-  const data = await api("/api/series");
-  state.series = data.series;
+function normalizeSeriesKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function enqueueArtTask(task) {
+  artQueue = artQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const result = await task();
+      await wait(360);
+      return result;
+    });
+  return artQueue;
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`Artwork lookup failed with ${response.status}.`);
+  }
+  return response.json();
+}
+
+function getArtworkForSeries(series) {
+  if (!series) return null;
+  const normalized = normalizeSeriesKey(series.title);
+  return state.seriesArt[normalized] || null;
+}
+
+function selectArtworkUrl(entry, preferred = "hero") {
+  if (!entry) return "";
+  if (preferred === "hero") {
+    return entry.hero_image_url || entry.cover_image_url || "";
+  }
+  return entry.cover_image_url || entry.hero_image_url || "";
+}
+
+function pickBestJikanMatch(title, candidates) {
+  const target = normalizeSeriesKey(title);
+  const targetWords = new Set(target.split(" ").filter(Boolean));
+  let winner = null;
+  let winnerScore = -Infinity;
+
+  for (const candidate of candidates || []) {
+    const candidateTitles = [
+      candidate.title,
+      candidate.title_english,
+      ...(candidate.titles || []).map((item) => item.title),
+    ]
+      .filter(Boolean)
+      .map(normalizeSeriesKey);
+
+    let bestScore = -Infinity;
+    for (const candidateTitle of candidateTitles) {
+      const candidateWords = new Set(candidateTitle.split(" ").filter(Boolean));
+      const overlap = [...targetWords].filter((word) => candidateWords.has(word)).length;
+      let score = overlap * 22;
+      if (candidateTitle === target) score += 180;
+      if (candidateTitle.startsWith(target) || target.startsWith(candidateTitle)) score += 70;
+      if (candidate.type === "Manga") score += 12;
+      if (candidate.status === "Publishing") score += 8;
+      score += Number(candidate.score || 0);
+      bestScore = Math.max(bestScore, score);
+    }
+
+    if (bestScore > winnerScore) {
+      winner = candidate;
+      winnerScore = bestScore;
+    }
+  }
+
+  return winner;
+}
+
+function buildArtEntry(candidate, existing = null) {
+  const images = candidate?.images || {};
+  const webp = images.webp || {};
+  const jpg = images.jpg || {};
+  return {
+    cached_at: Date.now(),
+    mal_id: candidate?.mal_id || existing?.mal_id || null,
+    title: candidate?.title || existing?.title || "",
+    mal_url: candidate?.url || existing?.mal_url || "",
+    cover_image_url:
+      webp.large_image_url ||
+      webp.image_url ||
+      jpg.large_image_url ||
+      jpg.image_url ||
+      existing?.cover_image_url ||
+      "",
+    hero_image_url: existing?.hero_image_url || "",
+  };
+}
+
+async function fetchSeriesArtwork(series) {
+  const cacheKey = normalizeSeriesKey(series.title);
+  const cached = state.seriesArt[cacheKey];
+  if (cached) {
+    return cached;
+  }
+
+  const query = encodeURIComponent(series.title);
+  const search = await fetchJson(`${JIKAN_API_BASE}/manga?q=${query}&limit=3`);
+  const match = pickBestJikanMatch(series.title, search.data || []);
+  if (!match) return null;
+
+  const entry = buildArtEntry(match);
+  state.seriesArt[cacheKey] = entry;
+  persistArtCache();
+
+  if (entry.mal_id) {
+    void enqueueArtTask(() => hydrateHeroArtwork(cacheKey, entry.mal_id));
+  }
+
+  return entry;
+}
+
+async function hydrateHeroArtwork(cacheKey, malId) {
+  const current = state.seriesArt[cacheKey];
+  if (!current || current.hero_image_url) return current;
+
+  try {
+    const response = await fetchJson(`${JIKAN_API_BASE}/manga/${malId}/pictures`);
+    const pictures = response.data || [];
+    const heroUrl =
+      pictures[1]?.webp?.large_image_url ||
+      pictures[1]?.jpg?.large_image_url ||
+      pictures[0]?.webp?.large_image_url ||
+      pictures[0]?.jpg?.large_image_url ||
+      current.cover_image_url;
+
+    state.seriesArt[cacheKey] = {
+      ...current,
+      cached_at: Date.now(),
+      hero_image_url: heroUrl || current.cover_image_url,
+    };
+    persistArtCache();
+    renderArtwork();
+    return state.seriesArt[cacheKey];
+  } catch (error) {
+    console.warn(error);
+    return current;
+  }
+}
+
+async function queueArtworkHydration(seriesList = state.series) {
+  for (const series of seriesList) {
+    const cacheKey = normalizeSeriesKey(series.title);
+    if (state.seriesArt[cacheKey] || state.artRequests.has(cacheKey)) {
+      continue;
+    }
+
+    state.artRequests.add(cacheKey);
+    void enqueueArtTask(async () => {
+      try {
+        await fetchSeriesArtwork(series);
+        renderArtwork();
+      } catch (error) {
+        console.warn(error);
+      } finally {
+        state.artRequests.delete(cacheKey);
+      }
+    });
+  }
+}
+
+function renderArtwork() {
+  renderBrandPanel();
+  renderSeries();
+  renderSeriesFocus();
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function getSelectedSeries() {
+  return state.series.find((item) => item.id === state.selectedSeriesId) || null;
+}
+
+function syncSelectedSeries() {
   if (!state.selectedSeriesId && state.series.length) {
     state.selectedSeriesId = state.series[0].id;
+    return;
   }
   if (state.selectedSeriesId && !state.series.some((item) => item.id === state.selectedSeriesId)) {
     state.selectedSeriesId = state.series[0]?.id ?? null;
+    state.chapterFilter = "all";
   }
-  renderSeries();
 }
 
-async function loadChapters(seriesId) {
+function compareSeries(left, right) {
+  const leftHero = normalizeSeriesKey(left.title) === "one piece" ? 1 : 0;
+  const rightHero = normalizeSeriesKey(right.title) === "one piece" ? 1 : 0;
+  if (leftHero !== rightHero) {
+    return rightHero - leftHero;
+  }
+
+  const chapterDelta = Number(right.chapter_count || 0) - Number(left.chapter_count || 0);
+  if (chapterDelta) return chapterDelta;
+
+  const checkedDelta =
+    new Date(right.last_checked_at || 0).getTime() - new Date(left.last_checked_at || 0).getTime();
+  if (checkedDelta) return checkedDelta;
+
+  return String(left.title || "").localeCompare(String(right.title || ""));
+}
+
+async function fetchCoreState() {
+  const [settingsData, seriesData, eventsData] = await Promise.all([
+    api("/api/settings"),
+    api("/api/series"),
+    api("/api/events"),
+  ]);
+
+  state.settings = settingsData;
+  state.series = [...seriesData.series].sort(compareSeries);
+  state.events = eventsData.events;
+  syncSelectedSeries();
+
+  if (state.selectedSeriesId) {
+    const chapterData = await api(`/api/series/${state.selectedSeriesId}/chapters`);
+    state.chapters = chapterData.chapters;
+  } else {
+    state.chapters = [];
+    state.selectedChapterIds.clear();
+  }
+
+  pruneSelectedChapters();
+}
+
+async function refreshAll({ quiet = false } = {}) {
+  if (state.isRefreshing) return;
+  state.isRefreshing = true;
+  renderShellMeta();
+  try {
+    await fetchCoreState();
+    state.lastRefreshAt = new Date();
+    if (!quiet) {
+      clearNotice();
+    }
+    renderAll();
+    void queueArtworkHydration();
+  } catch (error) {
+    handleError(error, quiet ? "Background refresh failed." : "Unable to refresh scanner state.");
+  } finally {
+    state.isRefreshing = false;
+    renderShellMeta();
+  }
+}
+
+async function loadChaptersForSeries(seriesId) {
   if (!seriesId) {
     state.chapters = [];
     state.selectedChapterIds.clear();
-    renderChapters();
+    renderAll();
     return;
   }
   const data = await api(`/api/series/${seriesId}/chapters`);
   state.chapters = data.chapters;
   pruneSelectedChapters();
-  renderChapters();
+  renderAll();
+  const selected = getSelectedSeries();
+  if (selected) {
+    void queueArtworkHydration([selected]);
+  }
 }
 
-async function loadEvents() {
-  const data = await api("/api/events");
-  renderEvents(data.events);
+function renderAll() {
+  renderBrandPanel();
+  renderSettings();
+  renderOverview();
+  renderSeries();
+  renderSeriesFocus();
+  renderFilters();
+  renderChapters();
+  renderEvents();
+  renderShellMeta();
+}
+
+function renderBrandPanel() {
+  const illustration = $("#brandIllustration");
+  const brandSeries = getSelectedSeries() || state.series[0] || null;
+  const art = getArtworkForSeries(brandSeries);
+  const heroUrl = selectArtworkUrl(art, "hero");
+
+  if (!illustration) return;
+
+  if (!heroUrl) {
+    illustration.innerHTML = `
+      <div class="brand-illustration-fallback">
+        <span>${escapeHtml(seriesMark(brandSeries?.title || "TCB Scanner"))}</span>
+      </div>
+    `;
+    return;
+  }
+
+  illustration.innerHTML = `
+    <img src="${escapeHtml(heroUrl)}" alt="" loading="eager" />
+  `;
 }
 
 function renderSettings() {
-  const form = $("#optionsForm");
-  const input = form?.elements.default_naming_format;
-  if (input && document.activeElement !== input) {
-    input.value = state.settings.default_naming_format || "{ChapterFullTitle}";
+  const optionsForm = $("#optionsForm");
+  const optionsInput = optionsForm?.elements.default_naming_format;
+  if (optionsInput && document.activeElement !== optionsInput) {
+    optionsInput.value = state.settings.default_naming_format || "{ChapterFullTitle}";
+  }
+
+  const seriesForm = $("#seriesForm");
+  if (seriesForm?.elements.naming_format) {
+    seriesForm.elements.naming_format.placeholder =
+      state.settings.default_naming_format || "{ChapterFullTitle}";
   }
 
   const variables = $("#namingVariables");
-  if (!variables) return;
-  variables.innerHTML = (state.settings.variables || [])
+  const variableMarkup = (state.settings.variables || [])
     .map(
       (variable) => `
-        <div class="variable-item">
+        <article class="variable-item">
           <code>{${escapeHtml(variable.name)}}</code>
           <span>${escapeHtml(variable.description)}</span>
-        </div>
+        </article>
       `,
     )
     .join("");
+  variables.innerHTML = variableMarkup;
+
+  const seriesVariables = $("#seriesNamingVariables");
+  if (seriesVariables) {
+    seriesVariables.innerHTML = (state.settings.variables || [])
+      .map(
+        (variable) => `
+          <article class="variable-item compact">
+            <code>${escapeHtml(formatVariableToken(variable.name))}</code>
+          </article>
+        `,
+      )
+      .join("");
+  }
+}
+
+function renderOverview() {
+  const totals = state.series.reduce(
+    (summary, series) => {
+      summary.tracked += 1;
+      summary.monitored += series.enabled ? 1 : 0;
+      summary.indexed += Number(series.chapter_count || 0);
+      summary.downloaded += Number(series.downloaded_count || 0);
+      summary.queued += Number(series.pending_count || 0);
+      summary.failed += Number(series.failed_count || 0);
+      return summary;
+    },
+    { tracked: 0, monitored: 0, indexed: 0, downloaded: 0, queued: 0, failed: 0 },
+  );
+
+  $("#seriesCount").textContent = `${totals.tracked} tracked`;
+  $("#overviewStats").innerHTML = `
+    ${metricCard(totals.tracked, "total series", "in library")}
+    ${metricCard(totals.monitored, "monitored", "active checks")}
+    ${metricCard(totals.indexed, "total chapters", "indexed")}
+  `;
+  $("#libraryBreakdown").innerHTML = `
+    ${breakdownRow("Found", totals.indexed, "neutral")}
+    ${breakdownRow("Downloaded", totals.downloaded, "success")}
+    ${breakdownRow("Queued", totals.queued, "accent")}
+    ${breakdownRow("Failed", totals.failed, totals.failed ? "danger" : "neutral")}
+  `;
 }
 
 function renderSeries() {
   const list = $("#seriesList");
-  const active = document.activeElement;
-  const editingInput = active?.matches("input[data-field='naming-format']") ? active : null;
-  const editingSeriesId = Number(editingInput?.closest("[data-series-id]")?.dataset.seriesId || 0);
-  const editingValue = editingInput?.value ?? "";
-  const editingStart = editingInput?.selectionStart ?? editingValue.length;
-  const editingEnd = editingInput?.selectionEnd ?? editingValue.length;
-  $("#seriesCount").textContent = `${state.series.length} tracked`;
   if (!state.series.length) {
-    list.innerHTML = '<div class="empty-state">No series tracked yet.</div>';
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>No tracked series yet</strong>
+        <p>Add a title from the right rail to start indexing chapters and filling the queue.</p>
+      </div>
+    `;
     return;
   }
+
   list.innerHTML = state.series
     .map((series) => {
-      const selected = series.id === state.selectedSeriesId ? " selected" : "";
-      const enabled = series.enabled ? "enabled" : "paused";
+      const isSelected = series.id === state.selectedSeriesId;
+      const art = getArtworkForSeries(series);
+      const coverUrl = selectArtworkUrl(art, "cover");
       return `
-        <article class="series-card${selected}" data-series-id="${series.id}">
-          <div class="card-head">
-            <div>
-              <h3>${escapeHtml(series.title)}</h3>
-              <p class="source-url">${escapeHtml(series.source_url)}</p>
+        <article
+          class="series-card${isSelected ? " selected" : ""}"
+          data-series-id="${series.id}"
+          tabindex="0"
+          role="button"
+          aria-pressed="${isSelected ? "true" : "false"}"
+        >
+          <div class="series-cover${coverUrl ? "" : " fallback"}">
+            ${
+              coverUrl
+                ? `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`
+                : `<div class="series-mark">${escapeHtml(seriesMark(series.title))}</div>`
+            }
+          </div>
+
+          <div class="series-body">
+            <div class="series-top">
+              <div class="series-copy">
+                <h3>${escapeHtml(series.title)}</h3>
+                <p>${escapeHtml(getHostLabel(series.source_url))}</p>
+              </div>
+              <span class="status-pill status-${series.enabled ? "enabled" : "paused"}">
+                ${series.enabled ? "Monitored" : "Paused"}
+              </span>
             </div>
-            <div class="series-status">
-              <label class="monitor-toggle">
-                <input type="checkbox" data-action="monitor" ${series.enabled ? "checked" : ""} />
-                <span>Monitor</span>
-              </label>
-              <span class="status-pill status-${enabled}">${enabled}</span>
+
+            <div class="series-stats">
+              ${seriesInlineStat(series.chapter_count, "found")}
+              ${seriesInlineStat(series.downloaded_count, "downloaded")}
+              ${seriesInlineStat(series.pending_count, "queued")}
+              ${seriesInlineStat(series.failed_count, "failed")}
             </div>
-          </div>
-          <p class="path-text">${escapeHtml(series.folder)}</p>
-          <div class="series-naming">
-            <label>
-              <span>Naming format</span>
-              <input data-field="naming-format" type="text" value="${escapeHtml(series.naming_format || "")}" placeholder="${escapeHtml(state.settings.default_naming_format || "{ChapterFullTitle}")}" />
-            </label>
-            <button class="small-action icon-only" data-action="saveNaming" title="Save naming format" aria-label="Save naming format">${icons.check}</button>
-          </div>
-          <div class="stats">
-            ${stat(series.chapter_count, "found")}
-            ${stat(series.downloaded_count, "cbz")}
-            ${stat(series.pending_count, "queued")}
-            ${stat(series.failed_count, "failed")}
-          </div>
-          <div class="actions">
-            <button class="small-action" data-action="select" title="Show chapters">${icons.retry}<span>Open</span></button>
-            <button class="small-action" data-action="check" title="Check now">${icons.check}<span>Check</span></button>
-            <button class="small-action" data-action="download" title="Queue skipped and failed chapters">${icons.download}<span>Missing</span></button>
-            <button class="small-action danger-action" data-action="delete" title="Delete series">${icons.trash}<span>Delete</span></button>
+
+            <div class="series-meta">
+              <span>${escapeHtml(formatInterval(series.check_interval_minutes))}</span>
+              <span>${escapeHtml(formatRelativeTime(series.last_checked_at))}</span>
+            </div>
+
+            ${
+              series.last_error
+                ? `<p class="series-error">${escapeHtml(series.last_error)}</p>`
+                : ""
+            }
           </div>
         </article>
       `;
     })
     .join("");
-  if (editingSeriesId) {
-    const restored = list.querySelector(
-      `[data-series-id="${editingSeriesId}"] input[data-field="naming-format"]`,
-    );
-    if (restored) {
-      restored.value = editingValue;
-      restored.focus();
-      restored.setSelectionRange(editingStart, editingEnd);
-    }
+}
+
+function seriesInlineStat(value, label) {
+  return `
+    <span class="series-stat-inline series-stat-${escapeHtml(label)}">
+      <i aria-hidden="true"></i>
+      <strong>${Number(value || 0)}</strong>
+    </span>
+  `;
+}
+
+function renderSeriesFocus() {
+  const panel = $("#selectedSeriesPanel");
+  const selected = getSelectedSeries();
+
+  if (!selected) {
+    panel.innerHTML = `
+      <div class="empty-state spacious">
+        <strong>Choose a series to open the queue deck</strong>
+        <p>The chapter workspace highlights naming rules, monitoring state, and the fastest actions for the selected title.</p>
+      </div>
+    `;
+    return;
   }
+
+  const statusClass = selected.enabled ? "enabled" : "paused";
+  const statusText = selected.enabled ? "Monitored" : "Paused";
+  const art = getArtworkForSeries(selected);
+  const heroUrl = selectArtworkUrl(art, "hero") || selectArtworkUrl(art, "cover");
+  const artStyle = heroUrl ? ` style="--focus-art: url('${heroUrl.replaceAll("'", "%27")}')"` : "";
+  const namingPreview = getNamingPreview(selected);
+  const sourceDisplay = formatSourceDisplay(selected.source_url);
+
+  panel.innerHTML = `
+    <div class="focus-hero" data-series-id="${selected.id}"${artStyle}>
+      <div class="focus-banner">
+        <div class="focus-emblem" aria-hidden="true">${icons.pirate}</div>
+        <div class="focus-copy">
+          <div class="focus-heading">
+            <h2>${escapeHtml(selected.title)}</h2>
+            <span class="status-pill status-${statusClass}">${statusText}</span>
+          </div>
+          <p class="focus-detail focus-detail-source">
+            <strong>Source:</strong>
+            <a class="focus-link" href="${escapeHtml(selected.source_url)}" target="_blank" rel="noreferrer">
+              ${escapeHtml(sourceDisplay)}
+            </a>
+          </p>
+          <div class="focus-detail-grid">
+            <span><strong>Library:</strong>${escapeHtml(selected.title)}</span>
+            <span><strong>Folder:</strong>${escapeHtml(selected.folder || selected.title)}</span>
+            <span><strong>Interval:</strong>${escapeHtml(formatInterval(selected.check_interval_minutes))}</span>
+            <span><strong>Last sync:</strong>${escapeHtml(formatRelativeTime(selected.last_checked_at))}</span>
+          </div>
+          <p class="focus-detail focus-detail-naming"><strong>Naming:</strong>${escapeHtml(namingPreview)}</p>
+          <div class="focus-tabs" aria-label="Series workspace sections">
+            <button class="focus-tab active" type="button">Chapters</button>
+            <button class="focus-tab" type="button">Details</button>
+            <button class="focus-tab" type="button">History</button>
+            <button class="focus-tab" type="button">Files</button>
+            <button class="focus-tab" type="button">Settings</button>
+          </div>
+        </div>
+        <div class="focus-art" aria-hidden="true"></div>
+      </div>
+
+      <div class="focus-actions" data-series-id="${selected.id}">
+        <label class="monitor-toggle compact">
+          <input type="checkbox" data-action="monitor" ${selected.enabled ? "checked" : ""} />
+          <span>${selected.enabled ? "Monitor new chapters automatically" : "Series is currently paused"}</span>
+        </label>
+
+        <div class="focus-action-row">
+          <button class="small-action" data-action="check">${icons.check}<span>Check now</span></button>
+          <button class="small-action" data-action="download">${icons.download}<span>Queue missing</span></button>
+          <button class="small-action danger-action" data-action="delete">${icons.trash}<span>Delete series</span></button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function getNamingPreview(series) {
+  const raw = series?.naming_format || state.settings.default_naming_format || "";
+  if (!raw || raw === "{ChapterFullTitle}") {
+    return `${series?.title || "{series}"} - Chapter {chapter} - {title}.cbz`;
+  }
+
+  const preview = String(raw)
+    .replaceAll("{ChapterFullTitle}", "{title}")
+    .replaceAll("{SeriesName}", "{series}")
+    .replaceAll("{SeriesTitle}", "{series}")
+    .replaceAll("{ChapterNumberPadded}", "{chapter.pad}")
+    .replaceAll("{ChapterNumber}", "{chapter}")
+    .replaceAll("{ChapterTitle}", "{title}")
+    .replaceAll("{ChapterName}", "{title}")
+    .replaceAll("{Scanlator}", "{scanlators}")
+    .replaceAll("{Group}", "{group}")
+    .replaceAll("{Date}", "{date}");
+  return preview.endsWith(".cbz") ? preview : `${preview}.cbz`;
+}
+
+function formatVariableToken(name) {
+  const mapping = {
+    ChapterFullTitle: "{title}",
+    ChapterNumber: "{chapter}",
+    ChapterNumberPadded: "{chapter.pad}",
+    ChapterTitle: "{chapter.title}",
+    ChapterName: "{chapter.title}",
+    SeriesName: "{series}",
+    SeriesTitle: "{series}",
+    PageCount: "{pages}",
+    Scanlator: "{scanlators}",
+    Group: "{group}",
+    Date: "{date}",
+  };
+  return mapping[name] || `{${name}}`;
+}
+
+function formatSourceDisplay(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
+function renderFilters() {
+  const filters = $("#chapterFilters");
+  const selected = getSelectedSeries();
+
+  if (!selected) {
+    filters.innerHTML = "";
+    return;
+  }
+
+  filters.innerHTML = CHAPTER_FILTERS.map((filter) => {
+    const count = state.chapters.filter(filter.matches).length;
+    return `
+      <button
+        class="filter-pill${state.chapterFilter === filter.id ? " active" : ""}"
+        type="button"
+        data-filter="${filter.id}"
+      >
+        <span>${filter.label}</span>
+        <strong>${count}</strong>
+      </button>
+    `;
+  }).join("");
 }
 
 function renderChapters() {
-  const selected = state.series.find((item) => item.id === state.selectedSeriesId);
-  $("#chapterTitle").textContent = selected ? selected.title : "Chapters";
-  $("#chapterCount").textContent = selected
-    ? `${state.chapters.length} chapter${state.chapters.length === 1 ? "" : "s"}`
-    : "Select a series";
+  const selected = getSelectedSeries();
   const list = $("#chapterList");
+  const head = $("#chapterListHead");
+  const visibleChapters = getVisibleChapters();
+
+  $("#chapterCount").textContent = buildChapterCountLabel(selected, visibleChapters.length);
+
   if (!selected) {
+    head.classList.add("hidden");
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>Queue is waiting for a series</strong>
+        <p>Select a tracked title from the left rail to inspect skipped, queued, downloaded, and failed chapters.</p>
+      </div>
+    `;
     renderSelectionTools();
-    list.innerHTML = '<div class="empty-state">Select a series to see chapters.</div>';
     return;
   }
+
   if (!state.chapters.length) {
+    head.classList.add("hidden");
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>No chapters indexed yet</strong>
+        <p>Run a check for this series and the queue will populate as soon as chapters are discovered.</p>
+      </div>
+    `;
     renderSelectionTools();
-    list.innerHTML = '<div class="empty-state">No chapters indexed yet.</div>';
     return;
   }
-  renderSelectionTools();
-  list.innerHTML = state.chapters
+
+  if (!visibleChapters.length) {
+    head.classList.add("hidden");
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>No chapters match this filter</strong>
+        <p>Switch filters to review other chapter states for ${escapeHtml(selected.title)}.</p>
+      </div>
+    `;
+    renderSelectionTools();
+    return;
+  }
+
+  head.classList.remove("hidden");
+  list.innerHTML = visibleChapters
     .map((chapter) => {
       const selectable = isChapterSelectable(chapter);
       const checked = state.selectedChapterIds.has(chapter.id) ? "checked" : "";
-      const selectBox = selectable
-        ? `<input class="chapter-select" type="checkbox" data-chapter-id="${chapter.id}" ${checked} aria-label="Select ${escapeHtml(chapter.display_title)}" />`
-        : '<span class="chapter-select-spacer"></span>';
-      const retryButton =
-        selectable
-          ? `<button class="small-action" data-chapter-id="${chapter.id}" data-action="retry">${icons.retry}<span>Queue</span></button>`
-          : "";
-      const meta = [
-        `Chapter ${escapeHtml(chapter.chapter_key)}`,
-        chapter.page_count ? `${chapter.page_count} pages` : "",
-        chapter.cbz_path ? escapeHtml(chapter.cbz_path) : "",
-        chapter.error ? escapeHtml(chapter.error) : "",
-      ]
-        .filter(Boolean)
-        .map((item) => `<span>${item}</span>`)
-        .join("");
+      const addedLabel = chapterTimestampLabel(chapter);
+      const addedTitle = chapterTimestampTitle(chapter);
+      const titleText = chapterDisplayName(selected, chapter);
       return `
-        <article class="chapter-row">
-          <div class="chapter-content">
-            ${selectBox}
-            <div class="chapter-main">
-              <h3>${escapeHtml(chapter.display_title)}</h3>
-              <div class="chapter-meta">${meta}</div>
+        <article class="chapter-row chapter-${escapeHtml(chapter.status)}">
+          <div class="chapter-cell chapter-select-cell">
+            ${
+              selectable
+                ? `<input class="chapter-select" type="checkbox" data-chapter-id="${chapter.id}" ${checked} aria-label="Select ${escapeHtml(chapter.display_title)}" />`
+                : '<span class="chapter-select-spacer" aria-hidden="true"></span>'
+            }
+          </div>
+
+          <div class="chapter-cell chapter-key">
+            <span>${escapeHtml(chapter.chapter_key)}</span>
+          </div>
+
+          <div class="chapter-cell chapter-main">
+            <h3>${escapeHtml(titleText)}</h3>
+            <div class="chapter-meta">
+              <span>${chapter.page_count ? `${Number(chapter.page_count)} pages` : "Awaiting download"}</span>
+              ${
+                chapter.cbz_path
+                  ? `<span class="path-pill" title="${escapeHtml(chapter.cbz_path)}">${escapeHtml(fileNameFromPath(chapter.cbz_path))}</span>`
+                  : ""
+              }
+              ${
+                chapter.error
+                  ? `<span class="error-pill" title="${escapeHtml(chapter.error)}">${escapeHtml(chapter.error)}</span>`
+                  : ""
+              }
             </div>
           </div>
-          <div class="actions">
-            <span class="status-pill status-${escapeHtml(chapter.status)}">${escapeHtml(chapter.status)}</span>
-            ${retryButton}
+
+          <div class="chapter-cell chapter-status-cell">
+            <span class="status-pill status-${escapeHtml(chapter.status)}">${escapeHtml(statusLabel(chapter.status))}</span>
+          </div>
+
+          <div class="chapter-cell chapter-added-cell">
+            <time title="${escapeHtml(addedTitle)}">${escapeHtml(addedLabel)}</time>
+          </div>
+
+          <div class="chapter-cell chapter-size-cell">
+            <span>${escapeHtml(chapterSizeLabel(chapter))}</span>
+          </div>
+
+          <div class="chapter-cell chapter-action-cell">
+            ${chapterActionMarkup(chapter, selectable)}
           </div>
         </article>
       `;
     })
     .join("");
+
+  renderSelectionTools();
 }
 
-function renderEvents(events) {
+function chapterDisplayName(series, chapter) {
+  const full = String(chapter.display_title || "").trim();
+  const prefix = `${series?.title || ""} Chapter ${chapter.chapter_key}`.trim();
+  if (full.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return full.slice(prefix.length).trim() || full;
+  }
+  return full;
+}
+
+function chapterSizeLabel(chapter) {
+  if (chapter.file_size_label) return chapter.file_size_label;
+  return "—";
+}
+
+function chapterActionMarkup(chapter, selectable) {
+  if (chapter.status === "downloaded") {
+    return `<button class="chapter-action-button" type="button" disabled aria-label="Downloaded chapter">${icons.folder}</button>`;
+  }
+  if (chapter.status === "pending" || chapter.status === "downloading") {
+    return `<button class="chapter-action-button" type="button" disabled aria-label="Queued chapter">${icons.pause}</button>`;
+  }
+  if (selectable) {
+    return `<button class="chapter-action-button" data-chapter-id="${chapter.id}" data-action="retry" aria-label="${chapter.status === "failed" ? "Retry chapter" : "Queue chapter"}">${chapter.status === "failed" ? icons.retry : icons.download}</button>`;
+  }
+  return '<span class="chapter-action-spacer" aria-hidden="true"></span>';
+}
+
+function chapterTimestamp(chapter) {
+  return chapter.downloaded_at || chapter.discovered_at || "";
+}
+
+function chapterTimestampLabel(chapter) {
+  const stamp = chapterTimestamp(chapter);
+  if (!stamp) return "Pending";
+  return formatRelativeTime(stamp);
+}
+
+function chapterTimestampTitle(chapter) {
+  const stamp = chapterTimestamp(chapter);
+  if (!stamp) return "";
+  return formatDate(stamp);
+}
+
+function renderEvents() {
   const list = $("#eventList");
-  if (!events.length) {
-    list.innerHTML = '<div class="empty-state">No activity yet.</div>';
+  $("#activityStatus").textContent = state.events.length ? "Live" : "Idle";
+
+  if (!state.events.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>No activity yet</strong>
+        <p>Checks, downloads, and errors will stream into this log as the worker runs.</p>
+      </div>
+    `;
     return;
   }
-  list.innerHTML = events
+
+  list.innerHTML = state.events
     .map(
       (event) => `
         <article class="event-row ${escapeHtml(event.level)}">
+          <time class="event-time">
+            <strong>${escapeHtml(formatRelativeTime(event.created_at))}</strong>
+            <span>${escapeHtml(formatDate(event.created_at))}</span>
+          </time>
           <span class="event-dot"></span>
           <div class="event-copy">
             <p>${escapeHtml(event.message)}</p>
-            <time>${formatDate(event.created_at)}</time>
           </div>
+          <span class="event-more" aria-hidden="true"></span>
         </article>
       `,
     )
@@ -257,33 +888,123 @@ function renderEvents(events) {
 
 function renderSelectionTools() {
   const tools = $("#chapterTools");
-  const selectableCount = state.chapters.filter(isChapterSelectable).length;
+  const bulkToggle = $("#bulkActionsToggle");
+  const bulkMenu = $("#chapterBulkMenu");
+  const dock = $("#selectionDock");
+  const selected = getSelectedSeries();
+  const visibleChapters = getVisibleChapters();
+  const selectableCount = visibleChapters.filter(isChapterSelectable).length;
   const selectedCount = countSelectedVisibleChapters();
-  tools.classList.toggle("hidden", selectableCount === 0);
+
+  tools.classList.toggle("hidden", !selected);
+  bulkToggle.disabled = !selectableCount && !selectedCount;
+  bulkToggle.setAttribute("aria-expanded", String(state.chapterBulkOpen));
+  bulkMenu.classList.toggle("hidden", !state.chapterBulkOpen || !selected);
+  $("#selectVisibleChapters").disabled = !selectableCount;
+  $("#clearSelectedChapters").disabled = !selectedCount;
+  $("#queueSelectedChapters").disabled = !selectedCount;
   $("#selectedCount").textContent = `${selectedCount} selected`;
-  $("#queueSelectedChapters").disabled = selectedCount === 0;
-  $("#selectVisibleChapters").disabled = selectableCount === 0;
-  $("#clearSelectedChapters").disabled = selectedCount === 0;
+
+  dock.classList.toggle("hidden", !selectedCount);
+  $("#selectionDockCount").textContent = `${selectedCount} chapter${selectedCount === 1 ? "" : "s"} selected`;
+  $("#clearSelectedChaptersDock").disabled = !selectedCount;
+  $("#queueSelectedChaptersDock").disabled = !selectedCount;
 }
 
-function stat(value, label) {
-  return `<div class="stat"><strong>${Number(value || 0)}</strong><span>${label}</span></div>`;
+function toggleChapterBulkMenu(force) {
+  if (typeof force === "boolean") {
+    state.chapterBulkOpen = force;
+  } else {
+    state.chapterBulkOpen = !state.chapterBulkOpen;
+  }
+  renderSelectionTools();
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+function renderShellMeta() {
+  const refreshButton = $("#refreshAll");
+  refreshButton.classList.toggle("is-spinning", state.isRefreshing);
+  refreshButton.disabled = state.isRefreshing;
+
+  if (state.isRefreshing) {
+    $("#shellStatus").textContent = "Refreshing scanner state…";
+    return;
+  }
+
+  const monitored = state.series.filter((series) => series.enabled).length;
+  const queued = state.series.reduce((sum, series) => sum + Number(series.pending_count || 0), 0);
+  const failed = state.series.reduce((sum, series) => sum + Number(series.failed_count || 0), 0);
+
+  if (!state.series.length) {
+    $("#shellStatus").textContent = "No monitored series yet. Add a title to begin scanning.";
+  } else {
+    const pieces = [
+      `${monitored} active monitor${monitored === 1 ? "" : "s"}`,
+      `${queued} queued`,
+      `${failed} failed`,
+    ];
+    $("#shellStatus").textContent = pieces.join(" · ");
+  }
+
+  $("#lastSync").textContent = state.lastRefreshAt ? formatRelativeTime(state.lastRefreshAt) : "Not yet";
+  renderStatusStrip();
 }
 
-function formatDate(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+function metricCard(value, label, meta) {
+  return `
+    <article class="metric-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${Number(value || 0)}</strong>
+      <p>${escapeHtml(meta)}</p>
+    </article>
+  `;
+}
+
+function breakdownRow(label, value, tone) {
+  return `
+    <div class="breakdown-row tone-${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${Number(value || 0)}</strong>
+    </div>
+  `;
+}
+
+function miniStat(value, label) {
+  return `
+    <div class="mini-stat">
+      <strong>${Number(value || 0)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
+function buildSeriesNote(series) {
+  if (Number(series.failed_count || 0) > 0) {
+    return "This series has failed chapters waiting for a retry. Review the queue and re-run the misses once the source is healthy.";
+  }
+  if (Number(series.pending_count || 0) > 0) {
+    return "Downloads are already queued for this title. The worker will continue packaging chapters into CBZ files in order.";
+  }
+  return "This title looks clean right now. Run a manual check if you want to force discovery ahead of the normal interval.";
+}
+
+function buildChapterCountLabel(selected, visibleCount) {
+  if (!selected) {
+    return "Select a series to see the queue.";
+  }
+  if (!state.chapters.length) {
+    return "No chapters indexed yet.";
+  }
+
+  const total = state.chapters.length;
+  if (state.chapterFilter === "all") {
+    return `${total} chapter${total === 1 ? "" : "s"} in the queue.`;
+  }
+  return `${visibleCount} visible of ${total} indexed chapters.`;
+}
+
+function getVisibleChapters() {
+  const activeFilter = CHAPTER_FILTERS.find((item) => item.id === state.chapterFilter) || CHAPTER_FILTERS[0];
+  return state.chapters.filter(activeFilter.matches);
 }
 
 function setTheme(theme) {
@@ -291,16 +1012,29 @@ function setTheme(theme) {
   document.documentElement.dataset.theme = normalized;
   localStorage.setItem(themeKey, normalized);
   const button = $("#themeToggle");
-  if (!button) return;
-  button.innerHTML = normalized === "dark" ? icons.sun : icons.moon;
+  button.innerHTML = `${normalized === "dark" ? icons.sun : icons.moon}<span>Theme</span>`;
   button.title = normalized === "dark" ? "Use light mode" : "Use dark mode";
   button.setAttribute("aria-label", button.title);
 }
 
+function renderStatusStrip() {
+  const primary = $("#statusPrimary");
+  const secondary = $("#statusSecondary");
+  if (!primary || !secondary) return;
+
+  primary.textContent = state.isRefreshing ? "Refreshing scanner" : "Engine idle";
+  secondary.textContent = getNextScanLabel();
+}
+
 function initTheme() {
   const saved = localStorage.getItem(themeKey);
-  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  setTheme(saved || (prefersDark ? "dark" : "light"));
+  setTheme(saved || "light");
+}
+
+function toggleOptionsPanel() {
+  const panel = $("#optionsPanel");
+  const isHidden = panel.classList.toggle("hidden");
+  $("#optionsToggle").setAttribute("aria-expanded", String(!isHidden));
 }
 
 function isChapterSelectable(chapter) {
@@ -317,11 +1051,205 @@ function pruneSelectedChapters() {
 }
 
 function countSelectedVisibleChapters() {
-  const visibleIds = new Set(state.chapters.map((chapter) => chapter.id));
+  const visibleIds = new Set(getVisibleChapters().map((chapter) => chapter.id));
   return [...state.selectedChapterIds].filter((chapterId) => visibleIds.has(chapterId)).length;
 }
 
-$("#seriesForm").addEventListener("submit", async (event) => {
+function clearSelectedChapters() {
+  for (const chapter of state.chapters) {
+    state.selectedChapterIds.delete(chapter.id);
+  }
+  toggleChapterBulkMenu(false);
+  renderChapters();
+}
+
+async function queueSelectedChapters() {
+  const selectedIds = getVisibleChapters()
+    .filter((chapter) => state.selectedChapterIds.has(chapter.id) && isChapterSelectable(chapter))
+    .map((chapter) => chapter.id);
+
+  if (!state.selectedSeriesId || !selectedIds.length) return;
+
+  await api(`/api/series/${state.selectedSeriesId}/queue-chapters`, {
+    method: "POST",
+    body: JSON.stringify({ chapter_ids: selectedIds }),
+  });
+
+  for (const chapterId of selectedIds) {
+    state.selectedChapterIds.delete(chapterId);
+  }
+
+  toggleChapterBulkMenu(false);
+  setNotice(`Queued ${selectedIds.length} selected chapter${selectedIds.length === 1 ? "" : "s"}.`, "success");
+  await refreshAll({ quiet: true });
+}
+
+function seriesMark(title) {
+  const parts = String(title || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return "TCB";
+  return parts
+    .slice(0, 3)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function getHostLabel(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function fileNameFromPath(value) {
+  return String(value || "").split(/[\\/]/).filter(Boolean).pop() || value;
+}
+
+function formatInterval(minutes) {
+  const totalMinutes = Number(minutes || 0);
+  if (!totalMinutes) return "Manual cadence";
+  const hours = totalMinutes / 60;
+  if (hours < 24) {
+    return `${hours}h cadence`;
+  }
+  const days = hours / 24;
+  return `${days}d cadence`;
+}
+
+function getNextScanLabel() {
+  const enabled = state.series.filter((series) => series.enabled);
+  if (!enabled.length) return "Next scan pending";
+
+  let soonest = null;
+  for (const series of enabled) {
+    if (!series.last_checked_at) {
+      return "Next scan due now";
+    }
+    const lastChecked = new Date(series.last_checked_at);
+    if (Number.isNaN(lastChecked.getTime())) continue;
+    const dueAt =
+      lastChecked.getTime() + Number(series.check_interval_minutes || 0) * 60 * 1000;
+    if (soonest === null || dueAt < soonest) {
+      soonest = dueAt;
+    }
+  }
+
+  if (soonest === null) return "Next scan pending";
+  const diff = soonest - Date.now();
+  if (diff <= 0) return "Next scan due now";
+  return `Next scan in ${formatDuration(diff)}`;
+}
+
+function formatDuration(valueMs) {
+  const totalSeconds = Math.max(0, Math.floor(valueMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+}
+
+function formatRelativeTime(value) {
+  if (!value) return "Never";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  const diffMs = date.getTime() - Date.now();
+  const steps = [
+    ["year", 1000 * 60 * 60 * 24 * 365],
+    ["month", 1000 * 60 * 60 * 24 * 30],
+    ["day", 1000 * 60 * 60 * 24],
+    ["hour", 1000 * 60 * 60],
+    ["minute", 1000 * 60],
+    ["second", 1000],
+  ];
+
+  for (const [unit, size] of steps) {
+    if (Math.abs(diffMs) >= size || unit === "second") {
+      const valueForUnit = Math.round(diffMs / size);
+      if (unit === "second" && Math.abs(valueForUnit) < 10) {
+        return "just now";
+      }
+      return relativeFormatter.format(valueForUnit, unit);
+    }
+  }
+
+  return "just now";
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case "skipped":
+      return "Found";
+    case "pending":
+      return "Queued";
+    case "downloading":
+      return "Downloading";
+    case "downloaded":
+      return "Downloaded";
+    case "failed":
+      return "Failed";
+    default:
+      return status;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function setNotice(message, type = "info") {
+  const bar = $("#noticeBar");
+  bar.textContent = message;
+  bar.className = `notice-bar ${type}`;
+  bar.classList.remove("hidden");
+  if (noticeTimer) {
+    clearTimeout(noticeTimer);
+  }
+  noticeTimer = setTimeout(() => {
+    clearNotice();
+  }, type === "error" ? 7000 : 4000);
+}
+
+function clearNotice() {
+  const bar = $("#noticeBar");
+  bar.className = "notice-bar hidden";
+  bar.textContent = "";
+}
+
+function handleError(error, prefix = "Something went wrong.") {
+  console.error(error);
+  const suffix = error instanceof Error ? error.message : String(error);
+  setNotice(`${prefix} ${suffix}`.trim(), "error");
+}
+
+function listen(element, eventName, handler) {
+  element.addEventListener(eventName, (event) => {
+    Promise.resolve(handler(event)).catch((error) => handleError(error));
+  });
+}
+
+listen($("#seriesForm"), "submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   const payload = {
@@ -329,31 +1257,24 @@ $("#seriesForm").addEventListener("submit", async (event) => {
     title: String(form.get("title") || ""),
     folder: String(form.get("folder") || ""),
     check_interval_hours: Number(form.get("check_interval_hours") || 1),
+    naming_format: String(form.get("naming_format") || "").trim() || null,
     enabled: form.get("enabled") === "on",
     backfill_existing: form.get("backfill_existing") === "on",
   };
+
   await api("/api/series", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+
   event.currentTarget.reset();
   event.currentTarget.elements.enabled.checked = true;
   event.currentTarget.elements.check_interval_hours.value = 1;
-  await refreshAll();
+  setNotice(`Tracking ${payload.title}.`, "success");
+  await refreshAll({ quiet: true });
 });
 
-$("#refreshAll").addEventListener("click", refreshAll);
-
-$("#optionsToggle").addEventListener("click", () => {
-  $("#optionsPanel").classList.toggle("hidden");
-});
-
-$("#themeToggle").addEventListener("click", () => {
-  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  setTheme(nextTheme);
-});
-
-$("#optionsForm").addEventListener("submit", async (event) => {
+listen($("#optionsForm"), "submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   await api("/api/settings", {
@@ -362,60 +1283,90 @@ $("#optionsForm").addEventListener("submit", async (event) => {
       default_naming_format: String(form.get("default_naming_format") || "{ChapterFullTitle}"),
     }),
   });
-  await refreshAll();
+  setNotice("Global naming defaults saved.", "success");
+  await refreshAll({ quiet: true });
 });
 
-$("#seriesList").addEventListener("click", async (event) => {
+listen($("#seriesList"), "click", async (event) => {
+  const card = event.target.closest("[data-series-id]");
+  if (!card) return;
+  const seriesId = Number(card.dataset.seriesId);
+  if (!seriesId || seriesId === state.selectedSeriesId) return;
+  state.selectedSeriesId = seriesId;
+  state.chapterFilter = "all";
+  await loadChaptersForSeries(seriesId);
+});
+
+$("#seriesList").addEventListener("keydown", (event) => {
+  const card = event.target.closest("[data-series-id]");
+  if (!card || (event.key !== "Enter" && event.key !== " ")) return;
+  event.preventDefault();
+  card.click();
+});
+
+listen($("#selectedSeriesPanel"), "click", async (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
-  const card = event.target.closest("[data-series-id]");
-  const seriesId = Number(card?.dataset.seriesId);
-  const action = button.dataset.action;
+
+  const seriesId = Number(button.closest("[data-series-id]")?.dataset.seriesId || state.selectedSeriesId);
   if (!seriesId) return;
 
-  if (action === "select") {
-    state.selectedSeriesId = seriesId;
-    await loadChapters(seriesId);
-    renderSeries();
-    return;
-  }
-  if (action === "check") {
+  if (button.dataset.action === "check") {
     await api(`/api/series/${seriesId}/check`, { method: "POST" });
+    setNotice("Manual check queued.", "success");
   }
-  if (action === "download") {
-    await api(`/api/series/${seriesId}/download-missing`, { method: "POST" });
+
+  if (button.dataset.action === "download") {
+    const result = await api(`/api/series/${seriesId}/download-missing`, { method: "POST" });
+    setNotice(`Queued ${Number(result.queued || 0)} missing chapter${Number(result.queued || 0) === 1 ? "" : "s"}.`, "success");
   }
-  if (action === "saveNaming") {
-    const input = card.querySelector("input[data-field='naming-format']");
+
+  if (button.dataset.action === "saveNaming") {
+    const input = $("#selectedSeriesPanel input[data-field='naming-format']");
     await api(`/api/series/${seriesId}/naming-format`, {
       method: "POST",
       body: JSON.stringify({ naming_format: input?.value || null }),
     });
+    setNotice("Series naming format updated.", "success");
   }
-  if (action === "delete") {
+
+  if (button.dataset.action === "delete") {
+    const confirmed = window.confirm("Delete this tracked series and its indexed chapter history?");
+    if (!confirmed) return;
     await api(`/api/series/${seriesId}`, { method: "DELETE" });
+    setNotice("Series removed from the scanner.", "success");
   }
-  await refreshAll();
+
+  await refreshAll({ quiet: true });
 });
 
-$("#seriesList").addEventListener("change", async (event) => {
+listen($("#selectedSeriesPanel"), "change", async (event) => {
   const input = event.target.closest("input[data-action='monitor']");
   if (!input) return;
-  const card = event.target.closest("[data-series-id]");
-  const seriesId = Number(card?.dataset.seriesId);
+  const seriesId = Number(input.closest("[data-series-id]")?.dataset.seriesId || state.selectedSeriesId);
   if (!seriesId) return;
   await api(`/api/series/${seriesId}/enabled`, {
     method: "POST",
     body: JSON.stringify({ enabled: input.checked }),
   });
-  await refreshAll();
+  setNotice(input.checked ? "Monitoring enabled." : "Monitoring paused.", "success");
+  await refreshAll({ quiet: true });
 });
 
-$("#chapterList").addEventListener("click", async (event) => {
+listen($("#chapterFilters"), "click", async (event) => {
+  const button = event.target.closest("button[data-filter]");
+  if (!button) return;
+  state.chapterFilter = button.dataset.filter || "all";
+  renderChapters();
+  renderFilters();
+});
+
+listen($("#chapterList"), "click", async (event) => {
   const button = event.target.closest("button[data-action='retry']");
   if (!button) return;
   await api(`/api/chapters/${Number(button.dataset.chapterId)}/retry`, { method: "POST" });
-  await refreshAll();
+  setNotice("Chapter moved back into the queue.", "success");
+  await refreshAll({ quiet: true });
 });
 
 $("#chapterList").addEventListener("change", (event) => {
@@ -431,34 +1382,40 @@ $("#chapterList").addEventListener("change", (event) => {
 });
 
 $("#selectVisibleChapters").addEventListener("click", () => {
-  for (const chapter of state.chapters.filter(isChapterSelectable)) {
+  for (const chapter of getVisibleChapters().filter(isChapterSelectable)) {
     state.selectedChapterIds.add(chapter.id);
   }
   renderChapters();
 });
 
-$("#clearSelectedChapters").addEventListener("click", () => {
-  for (const chapter of state.chapters) {
-    state.selectedChapterIds.delete(chapter.id);
+$("#clearSelectedChapters").addEventListener("click", clearSelectedChapters);
+$("#clearSelectedChaptersDock").addEventListener("click", clearSelectedChapters);
+listen($("#queueSelectedChapters"), "click", queueSelectedChapters);
+listen($("#queueSelectedChaptersDock"), "click", queueSelectedChapters);
+$("#bulkActionsToggle").addEventListener("click", () => {
+  toggleChapterBulkMenu();
+});
+document.addEventListener("click", (event) => {
+  const tools = $("#chapterTools");
+  if (!tools?.contains(event.target)) {
+    toggleChapterBulkMenu(false);
   }
-  renderChapters();
 });
 
-$("#queueSelectedChapters").addEventListener("click", async () => {
-  const selectedIds = state.chapters
-    .filter((chapter) => state.selectedChapterIds.has(chapter.id) && isChapterSelectable(chapter))
-    .map((chapter) => chapter.id);
-  if (!state.selectedSeriesId || !selectedIds.length) return;
-  await api(`/api/series/${state.selectedSeriesId}/queue-chapters`, {
-    method: "POST",
-    body: JSON.stringify({ chapter_ids: selectedIds }),
-  });
-  for (const chapterId of selectedIds) {
-    state.selectedChapterIds.delete(chapterId);
-  }
-  await refreshAll();
+$("#refreshAll").addEventListener("click", () => {
+  void refreshAll();
+});
+
+$("#optionsToggle").addEventListener("click", toggleOptionsPanel);
+
+$("#themeToggle").addEventListener("click", () => {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  setTheme(nextTheme);
 });
 
 initTheme();
-refreshAll();
-setInterval(refreshAll, 8000);
+renderAll();
+void refreshAll();
+setInterval(() => {
+  void refreshAll({ quiet: true });
+}, 8000);
