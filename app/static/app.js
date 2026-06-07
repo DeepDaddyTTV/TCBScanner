@@ -154,6 +154,17 @@ function selectArtworkUrl(entry, preferred = "hero") {
   return entry.cover_image_url || entry.hero_image_url || "";
 }
 
+function getMockupCoverUrl(series) {
+  const slug = normalizeSeriesKey(series?.title).replaceAll(" ", "-");
+  if (slug === "one-piece") {
+    return "/static/mockup_assets/series-one-piece-cover.png";
+  }
+  if (slug.startsWith("jujutsu-kaisen")) {
+    return "/static/mockup_assets/series-jujutsu-cover.png";
+  }
+  return "";
+}
+
 function pickBestJikanMatch(title, candidates) {
   const target = normalizeSeriesKey(title);
   const targetWords = new Set(target.split(" ").filter(Boolean));
@@ -490,7 +501,7 @@ function renderSeries() {
     .map((series) => {
       const isSelected = series.id === state.selectedSeriesId;
       const art = getArtworkForSeries(series);
-      const coverUrl = selectArtworkUrl(art, "cover");
+      const coverUrl = getMockupCoverUrl(series) || selectArtworkUrl(art, "cover");
       return `
         <article
           class="series-card${isSelected ? " selected" : ""}"
