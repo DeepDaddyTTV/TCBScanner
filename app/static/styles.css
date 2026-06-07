@@ -2134,7 +2134,7 @@ h3,
 }
 
 .library-rail .rail-scroll {
-  gap: 10px;
+  gap: 0;
 }
 
 .utility-rail .rail-scroll {
@@ -2142,12 +2142,18 @@ h3,
 }
 
 .library-rail .panel {
-  margin: 0 8px;
+  margin: 0;
   border: 1px solid var(--rail-line);
-  border-radius: 4px;
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 28%),
     var(--rail);
+}
+
+.library-rail .panel + .panel {
+  border-top: 0;
 }
 
 .main-stage .panel,
@@ -2318,6 +2324,10 @@ h3,
   background: currentColor;
 }
 
+.overview-panel {
+  padding-bottom: 0;
+}
+
 .overview-stats {
   gap: 0;
   margin-top: 14px;
@@ -2418,11 +2428,12 @@ h3,
 }
 
 .series-panel {
-  padding-bottom: 0;
+  padding: 14px 0 0;
 }
 
 .series-panel .panel-heading {
-  margin-bottom: 10px;
+  margin-bottom: 0;
+  padding: 0 14px 10px;
 }
 
 .series-panel .panel-heading .icon-button {
@@ -2435,12 +2446,13 @@ h3,
 
 .series-list {
   gap: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .series-card {
-  grid-template-columns: 102px minmax(0, 1fr);
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
   border: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   background:
@@ -2449,7 +2461,7 @@ h3,
 }
 
 .series-list > .series-card:first-child {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 0;
 }
 
 .series-card.selected {
@@ -2458,7 +2470,7 @@ h3,
 }
 
 .series-cover {
-  min-height: 102px;
+  min-height: 96px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0;
   background: rgba(255, 255, 255, 0.03);
@@ -2468,8 +2480,12 @@ h3,
   filter: grayscale(1) contrast(1.08) brightness(1.06);
 }
 
+.series-body {
+  overflow: visible;
+}
+
 .series-copy h3 {
-  font-size: 1.22rem;
+  font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: 0.01em;
   text-transform: uppercase;
@@ -2478,29 +2494,45 @@ h3,
 .series-copy p,
 .series-meta,
 .series-error {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .series-stats {
-  gap: 14px;
+  gap: 10px;
 }
 
 .series-stat-inline {
-  gap: 7px;
+  gap: 6px;
   font-family: "Barlow Condensed", "IBM Plex Sans", sans-serif;
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 600;
 }
 
 .series-stat-inline strong {
-  font-size: 1rem;
+  font-size: 0.98rem;
 }
 
 .series-meta {
-  gap: 10px;
+  gap: 8px;
   color: rgba(247, 240, 230, 0.72);
   font-family: "Barlow Condensed", "IBM Plex Sans", sans-serif;
   letter-spacing: 0.02em;
+}
+
+.series-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.series-card .status-pill {
+  flex: 0 0 auto;
+  align-self: start;
+  min-height: 28px;
+  padding: 0 8px;
+  white-space: nowrap;
+  font-size: 0.78rem;
 }
 
 .command-bar {
@@ -2617,7 +2649,8 @@ h3,
 .series-focus {
   position: relative;
   overflow: hidden;
-  padding: 18px;
+  padding: 16px 16px 10px;
+  border-bottom: 0;
 }
 
 .focus-hero {
@@ -2658,6 +2691,8 @@ h3,
 }
 
 .focus-copy {
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr auto;
   gap: 10px;
   padding-top: 4px;
 }
@@ -2783,8 +2818,9 @@ h3,
 }
 
 .chapter-panel {
-  margin-top: 12px;
-  padding: 14px 14px 0;
+  margin-top: 0;
+  border-top: 0;
+  padding: 10px 14px 0;
 }
 
 .chapter-toolbar-line {
@@ -3262,5 +3298,158 @@ select {
 
   .series-card {
     grid-template-columns: 88px minmax(0, 1fr);
+  }
+}
+
+/* Exact mockup asset pass */
+:root {
+  --paper: #f6f1e8;
+  --panel: rgba(249, 246, 240, 0.98);
+  --panel-strong: #fbf8f1;
+  --panel-soft: #f3ede4;
+  --line: rgba(47, 39, 31, 0.14);
+}
+
+.main-stage {
+  gap: 0;
+  padding-top: 12px;
+}
+
+.utility-rail {
+  padding-top: 12px;
+}
+
+.brand-panel {
+  display: block;
+  min-height: 179px;
+  height: 179px;
+  background: url("/static/mockup_assets/brand-panel.png") center/100% 100% no-repeat;
+}
+
+.brand-block,
+.brand-illustration {
+  display: none;
+}
+
+.command-bar {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.08) 52%),
+    radial-gradient(circle at top center, rgba(210, 191, 160, 0.16), transparent 60%),
+    var(--panel-strong);
+}
+
+.series-focus {
+  padding: 14px 16px 0;
+  border-bottom: 0;
+}
+
+.chapter-panel {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.series-card {
+  align-items: start;
+}
+
+.series-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.series-top {
+  align-items: center;
+}
+
+.series-copy {
+  min-width: 0;
+}
+
+.series-copy h3 {
+  font-size: 1.32rem;
+  line-height: 0.94;
+}
+
+.series-copy p {
+  color: rgba(247, 240, 230, 0.82);
+  font-family: "Barlow Condensed", "IBM Plex Sans", sans-serif;
+  font-size: 0.92rem;
+  line-height: 1.1;
+}
+
+.series-card .status-pill {
+  min-width: 96px;
+  justify-content: center;
+  align-self: start;
+}
+
+.focus-watermark {
+  display: none;
+}
+
+.focus-hero.use-mockup-art .focus-emblem {
+  width: 98px;
+  height: 98px;
+  margin-top: 4px;
+  background: url("/static/mockup_assets/one-piece-emblem.png") center/contain no-repeat;
+}
+
+.focus-hero.use-mockup-art .focus-emblem svg {
+  opacity: 0;
+}
+
+.focus-hero.use-mockup-art .focus-banner {
+  grid-template-columns: 110px minmax(0, 1fr) 236px;
+  gap: 12px;
+}
+
+.focus-hero.use-mockup-art .focus-copy {
+  gap: 9px;
+}
+
+.focus-hero.use-mockup-art .focus-heading h2 {
+  font-size: clamp(4.95rem, 5.8vw, 6rem);
+  letter-spacing: 0.025em;
+}
+
+.focus-hero.use-mockup-art .focus-heading .status-pill {
+  margin-top: 10px;
+}
+
+.focus-hero.use-mockup-art .focus-art {
+  min-height: 250px;
+  background-image: url("/static/mockup_assets/hero-art.png");
+  background-position: right top;
+  background-repeat: no-repeat;
+  background-size: contain;
+  filter: none;
+  opacity: 0.96;
+}
+
+.chapter-list-wrap {
+  border-radius: 0;
+}
+
+@media (max-width: 960px) {
+  .brand-panel {
+    height: auto;
+    min-height: 154px;
+    background-size: cover;
+  }
+
+  .focus-hero.use-mockup-art .focus-banner {
+    grid-template-columns: 1fr;
+  }
+
+  .focus-hero.use-mockup-art .focus-emblem {
+    width: 84px;
+    height: 84px;
+    margin-top: 0;
+  }
+
+  .focus-hero.use-mockup-art .focus-art {
+    min-height: 200px;
+    background-position: center top;
   }
 }

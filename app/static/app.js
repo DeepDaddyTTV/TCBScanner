@@ -72,7 +72,7 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
-const themeKey = "tcbscanner-theme-v2";
+const themeKey = "tcbscanner-theme-v3";
 const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 let noticeTimer = null;
 let artQueue = Promise.resolve();
@@ -401,24 +401,9 @@ function renderAll() {
 
 function renderBrandPanel() {
   const illustration = $("#brandIllustration");
-  const brandSeries = getSelectedSeries() || state.series[0] || null;
-  const art = getArtworkForSeries(brandSeries);
-  const heroUrl = selectArtworkUrl(art, "hero");
 
   if (!illustration) return;
-
-  if (!heroUrl) {
-    illustration.innerHTML = `
-      <div class="brand-illustration-fallback">
-        <span>${escapeHtml(seriesMark(brandSeries?.title || "TCB Scanner"))}</span>
-      </div>
-    `;
-    return;
-  }
-
-  illustration.innerHTML = `
-    <img src="${escapeHtml(heroUrl)}" alt="" loading="eager" />
-  `;
+  illustration.innerHTML = "";
 }
 
 function renderSettings() {
@@ -510,6 +495,7 @@ function renderSeries() {
         <article
           class="series-card${isSelected ? " selected" : ""}"
           data-series-id="${series.id}"
+          data-series-slug="${escapeHtml(normalizeSeriesKey(series.title).replaceAll(" ", "-"))}"
           tabindex="0"
           role="button"
           aria-pressed="${isSelected ? "true" : "false"}"
@@ -584,16 +570,21 @@ function renderSeriesFocus() {
   const statusText = selected.enabled ? "Monitored" : "Paused";
   const art = getArtworkForSeries(selected);
   const heroUrl = selectArtworkUrl(art, "hero") || selectArtworkUrl(art, "cover");
-  const artStyle = heroUrl ? ` style="--focus-art: url('${heroUrl.replaceAll("'", "%27")}')"` : "";
+  const seriesSlug = normalizeSeriesKey(selected.title).replaceAll(" ", "-");
+  const useMockupArt = seriesSlug === "one-piece";
+  const focusArtUrl = useMockupArt ? "/static/mockup_assets/hero-art.png" : heroUrl;
+  const artStyle = focusArtUrl
+    ? ` style="--focus-art: url('${focusArtUrl.replaceAll("'", "%27")}')"`
+    : "";
   const namingPreview = getNamingPreview(selected);
   const sourceDisplay = formatSourceDisplay(selected.source_url);
   const folderDisplay = formatFolderDisplay(selected.folder || selected.title);
 
   panel.innerHTML = `
-    <div class="focus-hero" data-series-id="${selected.id}"${artStyle}>
+    <div class="focus-hero${useMockupArt ? " use-mockup-art" : ""}" data-series-id="${selected.id}" data-series-slug="${escapeHtml(seriesSlug)}"${artStyle}>
       <div class="focus-watermark" aria-hidden="true"></div>
       <div class="focus-banner">
-        <div class="focus-emblem" aria-hidden="true">${icons.pirate}</div>
+        <div class="focus-emblem${useMockupArt ? " mockup-emblem" : ""}" aria-hidden="true">${icons.pirate}</div>
         <div class="focus-copy">
           <div class="focus-heading">
             <h2>${escapeHtml(selected.title)}</h2>
