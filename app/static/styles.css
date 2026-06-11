@@ -3339,8 +3339,19 @@ select {
 }
 
 .series-focus {
+  display: block;
   padding: 14px 16px 0;
   border-bottom: 0;
+}
+
+.focus-hero {
+  display: block;
+  min-height: 260px;
+  height: auto;
+}
+
+.focus-banner {
+  min-height: 260px;
 }
 
 .chapter-panel {
@@ -3568,6 +3579,7 @@ select,
 }
 
 .main-stage {
+  display: block;
   overflow: auto;
   gap: 0;
   padding: 0;
@@ -3960,7 +3972,12 @@ select,
 }
 
 :root[data-theme="dark"] .focus-hero.use-mockup-art .focus-emblem {
-  filter: brightness(0) invert(1);
+  background: none;
+  filter: none;
+}
+
+:root[data-theme="dark"] .focus-hero.use-mockup-art .focus-emblem svg {
+  opacity: 1;
 }
 
 :root[data-theme="dark"] .series-card.selected {
