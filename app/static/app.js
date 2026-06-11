@@ -164,6 +164,10 @@ function selectArtworkUrl(entry, preferred = "hero") {
   return entry.cover_image_url || entry.hero_image_url || "";
 }
 
+function getSeriesCoverUrl(series, art) {
+  return selectArtworkUrl(art, "cover") || getMockupCoverUrl(series) || "";
+}
+
 function getMockupCoverUrl(series) {
   const slug = normalizeSeriesKey(series?.title).replaceAll(" ", "-");
   if (slug === "one-piece") {
@@ -511,7 +515,7 @@ function renderSeries() {
     .map((series) => {
       const isSelected = series.id === state.selectedSeriesId;
       const art = getArtworkForSeries(series);
-      const coverUrl = getMockupCoverUrl(series) || selectArtworkUrl(art, "cover");
+      const coverUrl = getSeriesCoverUrl(series, art);
       const densityClass = getSeriesDensityClass(series.title);
       return `
         <article
@@ -1282,7 +1286,7 @@ function getFocusDensityClass(title) {
 }
 
 function getFocusEmblem(series, art, useMockupArt) {
-  const coverUrl = getMockupCoverUrl(series) || selectArtworkUrl(art, "cover");
+  const coverUrl = getSeriesCoverUrl(series, art);
   if (coverUrl) {
     return {
       className: "focus-emblem cover-emblem",
