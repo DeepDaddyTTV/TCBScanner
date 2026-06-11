@@ -1,7 +1,10 @@
 FROM python:3.12-slim
 
+ARG APP_VERSION=dev
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    APP_VERSION=${APP_VERSION} \
     DATA_DIR=/data \
     LIBRARY_DIR=/manga \
     WORK_DIR=/data/work

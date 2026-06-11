@@ -85,34 +85,8 @@ class MangaDownloader:
 
     async def _discover_chapters(self, source_url: str) -> tuple[str, list[dict[str, object]]]:
         if not scraper.host_is_supported(source_url):
-            raise ValueError("Only tcbonepiecechapters.com URLs are supported.")
-
-        html = await scraper.fetch_html(source_url)
-        page_url = source_url
-        if scraper.is_chapter_url(source_url):
-            all_chapters_url = scraper.find_all_chapters_url(html, source_url)
-            if all_chapters_url:
-                await asyncio.sleep(self.request_delay)
-                page_url = all_chapters_url
-                html = await scraper.fetch_html(all_chapters_url)
-
-        chapters = scraper.parse_chapter_links(html, page_url)
-        if chapters:
-            return page_url, chapters
-
-        if scraper.is_chapter_url(source_url):
-            title = scraper.parse_chapter_title(html, source_url)
-            chapter_key, sort_key = scraper.parse_chapter_key(title, source_url)
-            return source_url, [
-                {
-                    "url": source_url,
-                    "title": title,
-                    "chapter_key": chapter_key,
-                    "sort_key": sort_key,
-                }
-            ]
-
-        raise ValueError("No chapter links were found on that page.")
+            raise ValueError("This site is not in the current supported source list.")
+        return await scraper.discover_chapters(source_url, request_delay=self.request_delay)
 
     async def _download_chapter(self, series: dict[str, Any], chapter: dict[str, Any]) -> None:
         chapter_id = int(chapter["id"])

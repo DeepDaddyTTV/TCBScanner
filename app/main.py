@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from .downloader import MangaDownloader
+from . import scraper
 from .store import DEFAULT_NAMING_FORMAT, Store
 
 
@@ -23,6 +25,7 @@ SCHEDULER_INTERVAL_HOURS = max(
     float(os.getenv("TCB_SCHEDULER_INTERVAL_HOURS", "1")),
 )
 REQUEST_DELAY = max(0.2, float(os.getenv("TCB_REQUEST_DELAY", "0.8")))
+APP_VERSION = (os.getenv("APP_VERSION", "dev").strip() or "dev")
 NAMING_VARIABLES = [
     {
         "name": "SeriesName",
@@ -137,6 +140,17 @@ async def get_settings() -> dict[str, Any]:
     return {
         "default_naming_format": store.get_default_naming_format(),
         "variables": NAMING_VARIABLES,
+    }
+
+
+@app.get("/api/meta")
+async def get_meta() -> dict[str, Any]:
+    return {
+        "app_name": "TCBScanner",
+        "version": APP_VERSION,
+        "version_label": display_version(APP_VERSION),
+        "supported_source_count": scraper.supported_source_count(),
+        "supported_sources": scraper.list_supported_sources(),
     }
 
 
@@ -302,3 +316,12 @@ def parse_datetime(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def display_version(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return "dev"
+    if re.fullmatch(r"[0-9a-f]{40}", cleaned):
+        return cleaned[:7]
+    return cleaned

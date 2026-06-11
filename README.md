@@ -1,6 +1,6 @@
 # TCBScanner
 
-A Docker container that monitors TCBScans series pages, downloads chapter images in page order, packages each chapter as a `.cbz` file, and adds the result to a local manga library.
+A Docker container that monitors supported public manga and manhwa series pages, downloads chapter images in page order, packages each chapter as a `.cbz` file, and adds the result to a local manga library.
 
 Use it only for content you are allowed to archive. The app does not bypass logins, paywalls, DRM, or access controls; it only reads public pages you provide and spaces requests out with a configurable delay.
 
@@ -61,17 +61,53 @@ Supported environment variables:
 - `LIBRARY_DIR`: Container path where finished CBZ files are written. Default: `/manga`.
 - `WORK_DIR`: Container path for temporary image downloads before packaging. Default: `/data/work`.
 - `TCB_SCHEDULER_INTERVAL_HOURS`: How often the background scheduler wakes up to look for due series, in hours. Default: `1`.
-- `TCB_REQUEST_DELAY`: Delay between TCBScans requests, in seconds. Default: `0.8`.
+- `TCB_REQUEST_DELAY`: Delay between source requests, in seconds. Default: `0.8`.
+- `APP_VERSION`: Version label shown in the footer. The GitHub image pipeline sets this automatically from the commit SHA.
+
+## Supported Sites
+
+The current release supports 20 domains. This first wave focuses on the easiest public HTML-compatible sources from the EverythingMoe manga and manhwa lists.
+
+| Site | Domain | Provider family |
+| --- | --- | --- |
+| TCB One Piece Chapters | `tcbonepiecechapters.com` | Custom TCB HTML |
+| Mangalink | `linkmanga.com` | WordPress-style manga HTML |
+| PAWMANGA | `pawmanga.com` | WordPress-style manga HTML |
+| Mangaclash | `toonclash.com` | WordPress-style manga HTML |
+| Aqua Manga | `aquareader.org` | WordPress-style manga HTML |
+| Mangahot | `manhuahot.com` | WordPress-style manga HTML |
+| CoffeeManga | `coffeemanga.ink` | WordPress-style manga HTML |
+| MangaSushi | `mangasushi.org` | WordPress-style manga HTML |
+| Mangazin | `mangazin.org` | WordPress-style manga HTML |
+| Manhwatoon | `manhwatoon.me` | WordPress-style manga HTML |
+| Kingofshojo | `kingofshojo.com` | WordPress-style manga HTML |
+| Rokari Comics | `rokaricomics.com` | WordPress-style manga HTML |
+| Reset Scans | `reset-scans.org` | WordPress-style manga HTML |
+| Flame Scans | `flamescans.lol` | WordPress-style manga HTML |
+| Flame Comics | `flamecomics.xyz` | Next.js series HTML |
+| Mangack | `mangack.com` | WordPress-style manga HTML |
+| MangaRead | `mangaread.org` | WordPress-style manga HTML |
+| Lilymanga | `lilymanga.net` | WordPress-style manga HTML |
+| Rawkuma | `rawkuma.net` | WordPress-style manga HTML |
+| KDT Scans | `silentquill.net` | WordPress-style manga HTML |
+
+If a supported site changes its markup or introduces stricter bot protection, that site may need a provider refresh before scans succeed again.
 
 ## Add a Series
 
-Paste a TCBScans series URL such as:
+Paste a supported series URL such as:
 
 ```text
 https://tcbonepiecechapters.com/mangas/5/one-piece
 ```
 
-You can also paste a chapter URL; the app will try to resolve its "View All Chapters" link and monitor the series page.
+Or a supported WordPress-style series URL such as:
+
+```text
+https://kingofshojo.com/manga/under-the-oak-tree/
+```
+
+You can also paste a chapter URL; the app will try to resolve it back to the parent series page when that site exposes enough structure to do so.
 
 Fields:
 

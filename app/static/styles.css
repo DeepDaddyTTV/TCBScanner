@@ -1722,9 +1722,9 @@ svg {
   position: sticky;
   bottom: 14px;
   z-index: 12;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   max-width: 1680px;
   margin: 12px auto 0;
@@ -1740,6 +1740,22 @@ svg {
   font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+}
+
+.status-primary {
+  justify-self: start;
+  text-align: left;
+}
+
+.status-version {
+  justify-self: center;
+  text-align: center;
+  opacity: 0.84;
+}
+
+.status-secondary {
+  justify-self: end;
+  text-align: right;
 }
 
 .mobile-dock {

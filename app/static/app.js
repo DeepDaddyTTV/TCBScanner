@@ -56,6 +56,12 @@ const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const state = {
   series: [],
   events: [],
+  meta: {
+    version: "dev",
+    version_label: "dev",
+    supported_source_count: 0,
+    supported_sources: [],
+  },
   selectedSeriesId: null,
   chapters: [],
   selectedChapterIds: new Set(),
@@ -369,15 +375,17 @@ function compareSeries(left, right) {
 }
 
 async function fetchCoreState() {
-  const [settingsData, seriesData, eventsData] = await Promise.all([
+  const [settingsData, seriesData, eventsData, metaData] = await Promise.all([
     api("/api/settings"),
     api("/api/series"),
     api("/api/events"),
+    api("/api/meta"),
   ]);
 
   state.settings = settingsData;
   state.series = [...seriesData.series].sort(compareSeries);
   state.events = eventsData.events;
+  state.meta = metaData;
   syncSelectedSeries();
 
   if (state.selectedSeriesId) {
@@ -1204,10 +1212,12 @@ function setTheme(theme) {
 
 function renderStatusStrip() {
   const primary = $("#statusPrimary");
+  const version = $("#statusVersion");
   const secondary = $("#statusSecondary");
-  if (!primary || !secondary) return;
+  if (!primary || !version || !secondary) return;
 
   primary.textContent = state.isRefreshing ? "Refreshing scanner" : "Engine idle";
+  version.textContent = `Version ${state.meta.version_label || "dev"}`;
   secondary.textContent = getNextScanLabel();
 }
 
