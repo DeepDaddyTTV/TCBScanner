@@ -609,11 +609,13 @@ function renderSeriesFocus() {
     <div class="focus-hero${useMockupArt ? " use-mockup-art" : ""}${focusDensityClass}" data-series-id="${selected.id}" data-series-slug="${escapeHtml(seriesSlug)}"${artStyle}>
       <div class="focus-watermark" aria-hidden="true"></div>
       <div class="focus-banner">
-        <div class="${focusEmblemClass}" aria-hidden="true">${focusEmblemMarkup}</div>
+        <div class="focus-aside">
+          <div class="${focusEmblemClass}" aria-hidden="true">${focusEmblemMarkup}</div>
+          <span class="status-pill status-${statusClass}">${statusText}</span>
+        </div>
         <div class="focus-copy">
           <div class="focus-heading">
             <h2>${escapeHtml(selected.title)}</h2>
-            <span class="status-pill status-${statusClass}">${statusText}</span>
           </div>
           <p class="focus-detail focus-detail-source">
             <strong>Source:</strong>
@@ -656,28 +658,20 @@ function renderSeriesFocus() {
 
 function getNamingPreview(series) {
   const raw = series?.naming_format || state.settings.default_naming_format || "";
-  const conceptPreview = `${series?.title || "{series}"} - c{chapter} - {title} [{scanlators}].cbz`;
-  if (!raw || raw === "{ChapterFullTitle}") {
-    return conceptPreview;
-  }
-
-  if (
-    raw.includes("{SeriesName}") ||
-    raw.includes("{SeriesTitle}") ||
-    raw.includes("{ChapterNumberPadded}") ||
-    raw.includes("{ChapterNumber}")
-  ) {
-    return conceptPreview;
+  const seriesTitle = series?.title || "{series}";
+  if (!raw) {
+    return `${seriesTitle} Chapter {chapter} {chapter.title}.cbz`;
   }
 
   const preview = String(raw)
-    .replaceAll("{ChapterFullTitle}", "{title}")
-    .replaceAll("{SeriesName}", "{series}")
-    .replaceAll("{SeriesTitle}", "{series}")
+    .replaceAll("{ChapterFullTitle}", `${seriesTitle} Chapter {chapter} {chapter.title}`)
+    .replaceAll("{SeriesName}", seriesTitle)
+    .replaceAll("{SeriesTitle}", seriesTitle)
     .replaceAll("{ChapterNumberPadded}", "{chapter.pad}")
     .replaceAll("{ChapterNumber}", "{chapter}")
-    .replaceAll("{ChapterTitle}", "{title}")
-    .replaceAll("{ChapterName}", "{title}")
+    .replaceAll("{ChapterTitle}", "{chapter.title}")
+    .replaceAll("{ChapterName}", "{chapter.title}")
+    .replaceAll("{PageCount}", "{pages}")
     .replaceAll("{Scanlator}", "{scanlators}")
     .replaceAll("{Group}", "{group}")
     .replaceAll("{Date}", "{date}");

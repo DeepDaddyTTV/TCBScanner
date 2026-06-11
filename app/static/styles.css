@@ -4390,14 +4390,21 @@ select,
 }
 
 .theme-select-caret {
-  position: static;
-  width: 12px;
-  height: 12px;
+  display: block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 10px;
   margin-left: auto;
-  transform: none;
-  background: url("/static/ui-icons/down_arrow.png") center / contain no-repeat;
-  -webkit-mask: none;
-  mask: none;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.theme-select-caret path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .series-card {
@@ -4658,28 +4665,45 @@ select,
 }
 
 .focus-banner {
-  grid-template-columns: 110px minmax(0, 1fr) 236px;
-  gap: 12px;
+  grid-template-columns: 112px minmax(0, 1fr) 214px;
+  gap: 16px;
   align-items: start;
   min-height: 260px;
 }
 
+.focus-aside {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.focus-aside .status-pill {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  font-size: 0.72rem;
+  justify-content: center;
+}
+
 .focus-emblem {
+  display: grid;
+  place-items: center;
   width: 98px;
   height: 98px;
-  margin-top: 4px;
 }
 
 .focus-emblem.cover-emblem {
   overflow: hidden;
-  border: 1px solid rgba(47, 39, 31, 0.14);
-  background: rgba(255, 255, 255, 0.52);
+  border: 0;
+  background: transparent;
 }
 
 .focus-emblem.cover-emblem img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center center;
   display: block;
   filter: grayscale(1) contrast(1.06) brightness(1.02);
 }
@@ -4687,36 +4711,34 @@ select,
 .focus-copy {
   display: grid;
   grid-template-rows: auto auto auto auto auto;
-  gap: 9px;
-  padding-top: 2px;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 0;
 }
 
 .focus-heading {
   flex-wrap: nowrap;
   align-items: flex-start;
-  gap: 14px;
+  gap: 0;
 }
 
 .focus-heading h2 {
   font-family: "Bebas Neue", "Barlow Condensed", sans-serif;
-  font-size: clamp(4.8rem, 5.6vw, 5.9rem);
+  max-width: 100%;
+  font-size: clamp(4.4rem, 5.2vw, 5.6rem);
   letter-spacing: 0.02em;
   line-height: 0.86;
   white-space: nowrap;
 }
 
-.focus-heading .status-pill {
-  margin-top: 10px;
-}
-
 .focus-hero.focus-compact .focus-heading h2 {
-  font-size: clamp(3.85rem, 4.7vw, 4.85rem);
+  font-size: clamp(3.35rem, 4.1vw, 4.15rem);
   letter-spacing: 0.015em;
 }
 
 .focus-hero.focus-condensed .focus-heading h2 {
-  font-size: clamp(3.15rem, 4vw, 4.05rem);
-  letter-spacing: 0.01em;
+  font-size: clamp(2.55rem, 3.3vw, 3.2rem);
+  letter-spacing: 0.008em;
 }
 
 .focus-detail-grid {
@@ -4728,38 +4750,62 @@ select,
   max-width: 100%;
 }
 
+.focus-hero.focus-compact .focus-detail-grid,
+.focus-hero.focus-condensed .focus-detail-grid {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.focus-hero.focus-compact .focus-detail-grid span:nth-child(3),
+.focus-hero.focus-condensed .focus-detail-grid span:nth-child(3) {
+  flex-basis: 100%;
+}
+
+.focus-hero.focus-compact .focus-detail-grid span:nth-child(2)::after,
+.focus-hero.focus-condensed .focus-detail-grid span:nth-child(2)::after {
+  display: none;
+}
+
 .focus-art {
   min-height: 250px;
-  background-position: left center, center top;
+  background-position: right center;
   background-repeat: no-repeat;
-  background-size: cover, cover;
+  background-size: cover;
   filter: grayscale(0.82) sepia(0.08) brightness(1.02) contrast(0.98);
   opacity: 0.9;
 }
 
 .focus-hero.use-mockup-art .focus-emblem {
-  background: url("/static/mockup_assets/one-piece-emblem.png") center / contain no-repeat;
+  background: none;
+  color: #14110f;
+  filter: none;
 }
 
 .focus-hero.use-mockup-art .focus-emblem svg {
-  opacity: 0 !important;
+  width: 98px;
+  height: 98px;
+  opacity: 1 !important;
+}
+
+.focus-hero.use-mockup-art .focus-banner {
+  grid-template-columns: 112px minmax(0, 1fr) 214px;
+  gap: 16px;
 }
 
 :root[data-theme="dark"] .focus-art {
-  background-image:
-    linear-gradient(90deg, rgba(31, 27, 24, 0.88), rgba(31, 27, 24, 0.22) 34%, rgba(31, 27, 24, 0.04) 55%, rgba(31, 27, 24, 0)),
-    var(--focus-art);
-  filter: grayscale(1) invert(1) brightness(0.8) contrast(0.94);
-  opacity: 0.88;
+  background-image: var(--focus-art);
+  filter: grayscale(1) invert(1) brightness(0.76) contrast(0.92);
+  opacity: 0.62;
 }
 
 :root[data-theme="dark"] .focus-hero.use-mockup-art .focus-emblem {
-  background: url("/static/mockup_assets/one-piece-emblem.png") center / contain no-repeat;
-  filter: invert(1) brightness(0.96) contrast(0.98);
+  background: none;
+  color: #f7f0e7;
+  filter: none;
 }
 
 :root[data-theme="dark"] .focus-hero.use-mockup-art .focus-emblem svg {
-  opacity: 0 !important;
+  opacity: 1 !important;
 }
 
 @media (max-width: 1480px) {
