@@ -72,7 +72,12 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
-const themeKey = "tcbscanner-theme-v3";
+const themeKey = "tcbscanner-theme-v4";
+const legacyThemeKey = "tcbscanner-theme-v3";
+const themeMediaQuery =
+  typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
 const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 let noticeTimer = null;
 let artQueue = Promise.resolve();
@@ -1123,14 +1128,36 @@ function getVisibleChapters() {
   return state.chapters.filter(activeFilter.matches);
 }
 
+function normalizeThemeChoice(theme) {
+  return ["light", "dark", "system"].includes(theme) ? theme : "light";
+}
+
+function resolveThemeChoice(theme) {
+  if (theme === "system") {
+    return themeMediaQuery?.matches ? "dark" : "light";
+  }
+  return theme;
+}
+
+function syncThemeSelector(theme) {
+  const select = $("#themeSelect");
+  if (select && select.value !== theme) {
+    select.value = theme;
+  }
+
+  const icon = $("#themeModeIcon");
+  if (icon) {
+    icon.dataset.themeChoice = theme;
+  }
+}
+
 function setTheme(theme) {
-  const normalized = theme === "dark" ? "dark" : "light";
-  document.documentElement.dataset.theme = normalized;
+  const normalized = normalizeThemeChoice(theme);
+  const resolved = resolveThemeChoice(normalized);
+  document.documentElement.dataset.themeChoice = normalized;
+  document.documentElement.dataset.theme = resolved;
   localStorage.setItem(themeKey, normalized);
-  const button = $("#themeToggle");
-  button.innerHTML = `${normalized === "dark" ? icons.sun : icons.moon}<span>Theme</span>${icons.chevronDown}`;
-  button.title = normalized === "dark" ? "Use light mode" : "Use dark mode";
-  button.setAttribute("aria-label", button.title);
+  syncThemeSelector(normalized);
 }
 
 function renderStatusStrip() {
@@ -1143,8 +1170,12 @@ function renderStatusStrip() {
 }
 
 function initTheme() {
-  const saved = localStorage.getItem(themeKey);
-  setTheme(saved || "light");
+  const saved = localStorage.getItem(themeKey) || localStorage.getItem(legacyThemeKey) || "light";
+  const normalized = normalizeThemeChoice(saved);
+  if (localStorage.getItem(legacyThemeKey) && !localStorage.getItem(themeKey)) {
+    localStorage.setItem(themeKey, normalized);
+  }
+  setTheme(normalized);
 }
 
 function toggleOptionsPanel() {
@@ -1532,10 +1563,24 @@ $("#refreshAll").addEventListener("click", () => {
 
 $("#optionsToggle").addEventListener("click", toggleOptionsPanel);
 
-$("#themeToggle").addEventListener("click", () => {
-  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  setTheme(nextTheme);
+$("#themeSelect").addEventListener("change", (event) => {
+  setTheme(event.target.value);
 });
+
+if (themeMediaQuery) {
+  const handleThemeMediaChange = () => {
+    const selectedTheme = localStorage.getItem(themeKey) || "light";
+    if (normalizeThemeChoice(selectedTheme) === "system") {
+      setTheme("system");
+    }
+  };
+
+  if (typeof themeMediaQuery.addEventListener === "function") {
+    themeMediaQuery.addEventListener("change", handleThemeMediaChange);
+  } else if (typeof themeMediaQuery.addListener === "function") {
+    themeMediaQuery.addListener(handleThemeMediaChange);
+  }
+}
 
 initTheme();
 renderAll();
