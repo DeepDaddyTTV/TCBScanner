@@ -4178,52 +4178,72 @@ select,
 
 .brand-block {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  align-content: stretch;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
   gap: 8px;
-  padding: 12px 14px 12px 18px;
+  padding: 16px 14px 12px 20px;
+  background: #f6f1e8;
+  overflow: hidden;
 }
 
 .brand-logo {
-  width: 100%;
-  height: 112px;
+  position: relative;
+  width: 188px;
+  height: 114px;
   max-width: none;
+  overflow: hidden;
 }
 
 .brand-logo img {
+  position: absolute;
+  top: -40px;
+  left: -6px;
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  object-position: left top;
+  width: 188px;
+  height: 188px;
+  max-width: none;
+  object-fit: fill;
 }
 
-.brand-logo-dark {
+.brand-logo .brand-logo-light {
+  display: block;
+}
+
+.brand-logo .brand-logo-dark {
   display: none;
 }
 
 .brand-copy {
-  max-width: none;
-  gap: 8px;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  max-width: 188px;
+  margin-top: 0;
 }
 
 .brand-copy p {
-  color: #2a221b;
-  font-size: 0.82rem;
-  line-height: 1.14;
+  color: #241d17;
+  font-family: "Barlow Condensed", "IBM Plex Sans", sans-serif;
+  font-size: 0.93rem;
+  font-weight: 700;
+  line-height: 1.12;
+  text-transform: uppercase;
 }
 
 .brand-copy span {
-  color: #2a221b;
-  font-size: 0.74rem;
-  line-height: 1.04;
+  color: #241d17;
+  font-family: "Barlow Condensed", "IBM Plex Sans", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.08;
 }
 
 .brand-illustration {
   border-left: 1px solid rgba(47, 39, 31, 0.14);
   background:
     linear-gradient(180deg, rgba(246, 241, 232, 0.05), rgba(246, 241, 232, 0.05)),
-    url("/static/mockup_assets/brand-illustration.png") center / 100% 100% no-repeat;
+    url("/static/mockup_assets/brand-illustration.png") center / cover no-repeat;
 }
 
 .toolbar-text-button {
@@ -4239,14 +4259,16 @@ select,
 
 .theme-selector {
   position: relative;
-  min-width: 176px;
+  min-width: 188px;
 }
 
 .theme-selector-trigger {
   width: 100%;
+  display: flex;
+  align-items: center;
   justify-content: flex-start;
-  gap: 10px;
-  padding-right: 34px;
+  gap: 12px;
+  padding: 0 14px;
 }
 
 .theme-selector-label,
@@ -4259,6 +4281,7 @@ select,
   font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+  margin-left: 2px;
   text-transform: uppercase;
 }
 
@@ -4367,13 +4390,22 @@ select,
 }
 
 .theme-select-caret {
-  right: 14px;
+  position: static;
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  transform: none;
+  background: url("/static/ui-icons/down_arrow.png") center / contain no-repeat;
+  -webkit-mask: none;
+  mask: none;
 }
 
 .series-card {
   grid-template-columns: 104px minmax(0, 1fr);
+  align-items: start;
   gap: 14px;
-  padding: 14px 16px 14px 18px;
+  min-height: 150px;
+  padding: 16px 16px 16px 18px;
 }
 
 .series-cover {
@@ -4381,40 +4413,60 @@ select,
   height: 96px;
 }
 
+.series-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  filter: grayscale(1) contrast(1.12) brightness(1.02);
+}
+
 .series-body {
+  display: grid;
+  align-content: start;
   gap: 10px;
+  min-height: 96px;
 }
 
 .series-top {
-  grid-template-columns: minmax(0, 1fr) 132px;
+  grid-template-columns: minmax(0, 1fr) 126px;
+  align-items: start;
   gap: 12px;
 }
 
 .series-copy {
   display: grid;
   gap: 7px;
+  min-width: 0;
 }
 
 .series-copy h3 {
-  font-size: 1.68rem;
+  font-size: 1.46rem;
   line-height: 0.86;
   letter-spacing: 0.015em;
   overflow-wrap: normal !important;
   word-break: normal !important;
-  text-wrap: balance;
+  text-wrap: pretty;
 }
 
 .series-copy p {
   overflow-wrap: normal;
   word-break: normal;
   white-space: nowrap;
-  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.9rem;
+}
+
+.series-card-compact .series-copy h3 {
+  font-size: 1.18rem;
+  line-height: 0.92;
 }
 
 .series-card .status-pill {
   width: 100%;
   min-width: 0;
-  min-height: 48px;
+  min-height: 46px;
   padding: 0 10px;
   font-size: 0.72rem;
   letter-spacing: 0.07em;
@@ -4505,6 +4557,22 @@ select,
   height: 24px;
 }
 
+.sync-badge {
+  min-width: 0;
+  padding: 0 6px 0 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.sync-badge span {
+  font-size: 0.86rem;
+}
+
+.sync-badge strong {
+  font-size: 1.2rem;
+}
+
 .app-shell {
   padding: 0 !important;
 }
@@ -4530,24 +4598,29 @@ select,
   background: #1f1b18;
 }
 
-:root[data-theme="dark"] .brand-logo-light {
+:root[data-theme="dark"] .brand-block {
+  background: #1f1b18;
+}
+
+:root[data-theme="dark"] .brand-logo .brand-logo-light {
   display: none;
 }
 
-:root[data-theme="dark"] .brand-logo-dark {
+:root[data-theme="dark"] .brand-logo .brand-logo-dark {
   display: block;
 }
 
 :root[data-theme="dark"] .brand-copy p,
 :root[data-theme="dark"] .brand-copy span {
-  color: #f5efe6;
+  color: #f7f0e7;
 }
 
 :root[data-theme="dark"] .brand-illustration {
   border-left-color: rgba(255, 245, 232, 0.12);
   background:
-    linear-gradient(rgba(27, 23, 20, 0.52), rgba(27, 23, 20, 0.52)),
-    url("/static/mockup_assets/brand-illustration.png") center / 100% 100% no-repeat;
+    linear-gradient(rgba(27, 23, 20, 0.18), rgba(27, 23, 20, 0.18)),
+    url("/static/mockup_assets/brand-illustration.png") center / cover no-repeat;
+  filter: invert(1) brightness(0.72) contrast(0.92);
 }
 
 :root[data-theme="dark"] .field-span .select-shell {
@@ -4584,13 +4657,118 @@ select,
   box-shadow: none;
 }
 
+.focus-banner {
+  grid-template-columns: 110px minmax(0, 1fr) 236px;
+  gap: 12px;
+  align-items: start;
+  min-height: 260px;
+}
+
+.focus-emblem {
+  width: 98px;
+  height: 98px;
+  margin-top: 4px;
+}
+
+.focus-emblem.cover-emblem {
+  overflow: hidden;
+  border: 1px solid rgba(47, 39, 31, 0.14);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.focus-emblem.cover-emblem img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: grayscale(1) contrast(1.06) brightness(1.02);
+}
+
+.focus-copy {
+  display: grid;
+  grid-template-rows: auto auto auto auto auto;
+  gap: 9px;
+  padding-top: 2px;
+}
+
+.focus-heading {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.focus-heading h2 {
+  font-family: "Bebas Neue", "Barlow Condensed", sans-serif;
+  font-size: clamp(4.8rem, 5.6vw, 5.9rem);
+  letter-spacing: 0.02em;
+  line-height: 0.86;
+  white-space: nowrap;
+}
+
+.focus-heading .status-pill {
+  margin-top: 10px;
+}
+
+.focus-hero.focus-compact .focus-heading h2 {
+  font-size: clamp(3.85rem, 4.7vw, 4.85rem);
+  letter-spacing: 0.015em;
+}
+
+.focus-hero.focus-condensed .focus-heading h2 {
+  font-size: clamp(3.15rem, 4vw, 4.05rem);
+  letter-spacing: 0.01em;
+}
+
+.focus-detail-grid {
+  gap: 14px;
+  margin-top: 2px;
+}
+
+.focus-detail-grid span {
+  max-width: 100%;
+}
+
+.focus-art {
+  min-height: 250px;
+  background-position: left center, center top;
+  background-repeat: no-repeat;
+  background-size: cover, cover;
+  filter: grayscale(0.82) sepia(0.08) brightness(1.02) contrast(0.98);
+  opacity: 0.9;
+}
+
+.focus-hero.use-mockup-art .focus-emblem {
+  background: url("/static/mockup_assets/one-piece-emblem.png") center / contain no-repeat;
+}
+
+.focus-hero.use-mockup-art .focus-emblem svg {
+  opacity: 0 !important;
+}
+
+:root[data-theme="dark"] .focus-art {
+  background-image:
+    linear-gradient(90deg, rgba(31, 27, 24, 0.88), rgba(31, 27, 24, 0.22) 34%, rgba(31, 27, 24, 0.04) 55%, rgba(31, 27, 24, 0)),
+    var(--focus-art);
+  filter: grayscale(1) invert(1) brightness(0.8) contrast(0.94);
+  opacity: 0.88;
+}
+
+:root[data-theme="dark"] .focus-hero.use-mockup-art .focus-emblem {
+  background: url("/static/mockup_assets/one-piece-emblem.png") center / contain no-repeat;
+  filter: invert(1) brightness(0.96) contrast(0.98);
+}
+
+:root[data-theme="dark"] .focus-hero.use-mockup-art .focus-emblem svg {
+  opacity: 0 !important;
+}
+
 @media (max-width: 1480px) {
   .app-frame {
     grid-template-columns: 388px minmax(0, 1fr) 330px;
   }
 
   .series-copy h3 {
-    font-size: 1.56rem;
+    font-size: 1.34rem;
   }
 }
 
@@ -4621,7 +4799,7 @@ select,
   }
 
   .series-copy h3 {
-    font-size: 1.46rem;
+    font-size: 1.24rem;
   }
 }
 
@@ -4649,8 +4827,15 @@ select,
   }
 
   .brand-logo {
-    width: 100%;
-    height: 102px;
+    width: 164px;
+    height: 100px;
+  }
+
+  .brand-logo img {
+    top: -35px;
+    left: -5px;
+    width: 164px;
+    height: 164px;
   }
 
   .series-card {

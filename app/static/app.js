@@ -512,9 +512,10 @@ function renderSeries() {
       const isSelected = series.id === state.selectedSeriesId;
       const art = getArtworkForSeries(series);
       const coverUrl = getMockupCoverUrl(series) || selectArtworkUrl(art, "cover");
+      const densityClass = getSeriesDensityClass(series.title);
       return `
         <article
-          class="series-card${isSelected ? " selected" : ""}"
+          class="series-card${isSelected ? " selected" : ""}${densityClass}"
           data-series-id="${series.id}"
           data-series-slug="${escapeHtml(normalizeSeriesKey(series.title).replaceAll(" ", "-"))}"
           tabindex="0"
@@ -594,6 +595,9 @@ function renderSeriesFocus() {
   const seriesSlug = normalizeSeriesKey(selected.title).replaceAll(" ", "-");
   const useMockupArt = seriesSlug === "one-piece";
   const focusArtUrl = useMockupArt ? "/static/mockup_assets/hero-art.png" : heroUrl;
+  const focusDensityClass = getFocusDensityClass(selected.title);
+  const focusEmblemClass = `focus-emblem${useMockupArt ? " mockup-emblem" : " cover-emblem"}`;
+  const focusEmblemMarkup = getFocusEmblemMarkup(selected, art, useMockupArt);
   const artStyle = focusArtUrl
     ? ` style="--focus-art: url('${focusArtUrl.replaceAll("'", "%27")}')"`
     : "";
@@ -602,10 +606,10 @@ function renderSeriesFocus() {
   const folderDisplay = formatFolderDisplay(selected.folder || selected.title);
 
   panel.innerHTML = `
-    <div class="focus-hero${useMockupArt ? " use-mockup-art" : ""}" data-series-id="${selected.id}" data-series-slug="${escapeHtml(seriesSlug)}"${artStyle}>
+    <div class="focus-hero${useMockupArt ? " use-mockup-art" : ""}${focusDensityClass}" data-series-id="${selected.id}" data-series-slug="${escapeHtml(seriesSlug)}"${artStyle}>
       <div class="focus-watermark" aria-hidden="true"></div>
       <div class="focus-banner">
-        <div class="focus-emblem${useMockupArt ? " mockup-emblem" : ""}" aria-hidden="true">${icons.pirate}</div>
+        <div class="${focusEmblemClass}" aria-hidden="true">${focusEmblemMarkup}</div>
         <div class="focus-copy">
           <div class="focus-heading">
             <h2>${escapeHtml(selected.title)}</h2>
@@ -1270,6 +1274,31 @@ function seriesMark(title) {
     .map((part) => part[0])
     .join("")
     .toUpperCase();
+}
+
+function getSeriesDensityClass(title) {
+  const normalized = normalizeSeriesKey(title).replaceAll(" ", "");
+  return normalized.length >= 18 ? " series-card-compact" : "";
+}
+
+function getFocusDensityClass(title) {
+  const normalized = normalizeSeriesKey(title).replaceAll(" ", "");
+  if (normalized.length >= 28) return " focus-condensed";
+  if (normalized.length >= 18) return " focus-compact";
+  return "";
+}
+
+function getFocusEmblemMarkup(series, art, useMockupArt) {
+  if (useMockupArt) {
+    return icons.pirate;
+  }
+
+  const coverUrl = getMockupCoverUrl(series) || selectArtworkUrl(art, "cover");
+  if (coverUrl) {
+    return `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`;
+  }
+
+  return `<div class="series-mark">${escapeHtml(seriesMark(series?.title))}</div>`;
 }
 
 function getHostLabel(url) {
