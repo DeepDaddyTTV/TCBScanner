@@ -4172,6 +4172,8 @@ select,
 .brand-block,
 .brand-illustration {
   display: block;
+  min-height: 0;
+  height: 100%;
 }
 
 .brand-block {
