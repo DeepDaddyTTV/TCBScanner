@@ -50,7 +50,7 @@ const CHAPTER_FILTERS = [
 ];
 
 const JIKAN_API_BASE = "https://api.jikan.moe/v4";
-const ART_CACHE_KEY = "tcbscanner-jikan-art-v3";
+const ART_CACHE_KEY = "tcbscanner-jikan-art-v4";
 const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 
 const state = {
@@ -233,7 +233,19 @@ function buildArtEntry(candidate, existing = null) {
       existing?.cover_image_url ||
       "",
     hero_image_url: existing?.hero_image_url || "",
+    pictures_hydrated: existing?.pictures_hydrated || false,
   };
+}
+
+function getPictureUrl(picture) {
+  if (!picture) return "";
+  return (
+    picture?.webp?.large_image_url ||
+    picture?.webp?.image_url ||
+    picture?.jpg?.large_image_url ||
+    picture?.jpg?.image_url ||
+    ""
+  );
 }
 
 async function fetchSeriesArtwork(series) {
@@ -261,22 +273,26 @@ async function fetchSeriesArtwork(series) {
 
 async function hydrateHeroArtwork(cacheKey, malId) {
   const current = state.seriesArt[cacheKey];
-  if (!current || current.hero_image_url) return current;
+  if (!current || current.pictures_hydrated) return current;
 
   try {
     const response = await fetchJson(`${JIKAN_API_BASE}/manga/${malId}/pictures`);
     const pictures = response.data || [];
+    const pictureUrls = pictures.map(getPictureUrl).filter(Boolean);
+    const coverUrl = pictureUrls[0] || current.cover_image_url;
     const heroUrl =
-      pictures[1]?.webp?.large_image_url ||
-      pictures[1]?.jpg?.large_image_url ||
-      pictures[0]?.webp?.large_image_url ||
-      pictures[0]?.jpg?.large_image_url ||
+      pictureUrls.find((url) => url !== coverUrl) ||
+      pictureUrls[1] ||
+      coverUrl ||
+      current.hero_image_url ||
       current.cover_image_url;
 
     state.seriesArt[cacheKey] = {
       ...current,
       cached_at: Date.now(),
+      cover_image_url: coverUrl || current.cover_image_url,
       hero_image_url: heroUrl || current.cover_image_url,
+      pictures_hydrated: true,
     };
     persistArtCache();
     renderArtwork();
