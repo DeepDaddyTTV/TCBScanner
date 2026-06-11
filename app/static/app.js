@@ -1178,10 +1178,13 @@ function initTheme() {
   setTheme(normalized);
 }
 
-function toggleOptionsPanel() {
-  const panel = $("#optionsPanel");
-  const isHidden = panel.classList.toggle("hidden");
-  $("#optionsToggle").setAttribute("aria-expanded", String(!isHidden));
+function toggleOptionsPanel(forceOpen) {
+  const panel = $("#settingsDrawer");
+  if (!panel) return;
+  const isOpen = typeof forceOpen === "boolean" ? forceOpen : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !isOpen);
+  panel.setAttribute("aria-hidden", String(!isOpen));
+  $("#optionsToggle").setAttribute("aria-expanded", String(isOpen));
 }
 
 function isChapterSelectable(chapter) {
@@ -1440,6 +1443,7 @@ listen($("#optionsForm"), "submit", async (event) => {
   });
   setNotice("Global naming defaults saved.", "success");
   await refreshAll({ quiet: true });
+  toggleOptionsPanel(false);
 });
 
 listen($("#seriesList"), "click", async (event) => {
@@ -1562,9 +1566,18 @@ $("#refreshAll").addEventListener("click", () => {
 });
 
 $("#optionsToggle").addEventListener("click", toggleOptionsPanel);
+$("#settingsDrawerClose").addEventListener("click", () => {
+  toggleOptionsPanel(false);
+});
 
 $("#themeSelect").addEventListener("change", (event) => {
   setTheme(event.target.value);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    toggleOptionsPanel(false);
+  }
 });
 
 if (themeMediaQuery) {

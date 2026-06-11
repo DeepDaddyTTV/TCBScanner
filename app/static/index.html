@@ -17,7 +17,8 @@
         document.documentElement.dataset.theme = normalized === "system" ? (prefersDark ? "dark" : "light") : normalized;
       })();
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260610c" />
+    <link rel="icon" type="image/png" href="/static/branding/tcb-scanner-favicon.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260610d" />
   </head>
   <body>
     <main class="app-shell">
@@ -26,9 +27,9 @@
           <div class="rail-scroll">
             <section class="brand-panel" id="brandPanel">
               <div class="brand-block">
-                <div class="brand-wordmark" aria-label="TCB Scanner">
-                  <span class="brand-wordmark-tcb">TCB</span>
-                  <span class="brand-wordmark-scanner">Scanner</span>
+                <div class="brand-logo" aria-label="TCB Scanner">
+                  <img class="brand-logo-light" src="/static/branding/tcb-scanner-light.png" alt="TCB Scanner" />
+                  <img class="brand-logo-dark" src="/static/branding/tcb-scanner-dark.png" alt="TCB Scanner" />
                 </div>
                 <div class="brand-copy">
                   <p>Manga chapter monitor &amp; CBZ download manager</p>
@@ -84,7 +85,7 @@
             </div>
 
             <div class="topbar-actions">
-              <button class="toolbar-text-button" id="optionsToggle" title="Global options" aria-label="Global options" aria-expanded="false" aria-controls="optionsPanel">
+              <button class="toolbar-text-button" id="optionsToggle" title="Global options" aria-label="Global options" aria-expanded="false" aria-controls="settingsDrawer">
                 <span class="ui-icon ui-icon-settings" aria-hidden="true"></span>
                 <span>Settings</span>
               </button>
@@ -92,12 +93,14 @@
                 <label class="sr-only" for="themeSelect">Theme</label>
                 <span class="ui-icon theme-mode-icon" id="themeModeIcon" aria-hidden="true"></span>
                 <span class="theme-selector-label">Theme</span>
-                <select class="theme-select" id="themeSelect" aria-label="Theme">
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                  <option value="system">System</option>
-                </select>
-                <span class="theme-select-caret" aria-hidden="true"></span>
+                <span class="select-shell theme-select-shell">
+                  <select class="theme-select" id="themeSelect" aria-label="Theme">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                    <option value="system">System</option>
+                  </select>
+                  <span class="select-caret theme-select-caret" aria-hidden="true"></span>
+                </span>
               </div>
             </div>
           </div>
@@ -186,17 +189,20 @@
                 </label>
                 <label class="field-span">
                   <span>Check interval</span>
-                  <select name="check_interval_hours">
-                    <option value="0.5" selected>30 minutes</option>
-                    <option value="1">1 hour</option>
-                    <option value="2">2 hours</option>
-                    <option value="6">6 hours</option>
-                    <option value="12">12 hours</option>
-                    <option value="24">24 hours</option>
-                    <option value="48">48 hours</option>
-                    <option value="72">72 hours</option>
-                    <option value="168">1 week</option>
-                  </select>
+                  <span class="select-shell">
+                    <select name="check_interval_hours">
+                      <option value="0.5" selected>30 minutes</option>
+                      <option value="1">1 hour</option>
+                      <option value="2">2 hours</option>
+                      <option value="6">6 hours</option>
+                      <option value="12">12 hours</option>
+                      <option value="24">24 hours</option>
+                      <option value="48">48 hours</option>
+                      <option value="72">72 hours</option>
+                      <option value="168">1 week</option>
+                    </select>
+                    <span class="select-caret" aria-hidden="true"></span>
+                  </span>
                 </label>
                 <label class="field-span">
                   <span>Naming format</span>
@@ -218,26 +224,6 @@
               </form>
             </section>
 
-            <section class="panel options-panel hidden" id="optionsPanel" aria-label="Global options">
-              <div class="panel-heading">
-                <div>
-                  <h2>Global naming defaults</h2>
-                  <p>Set the template new series should inherit before custom overrides are applied.</p>
-                </div>
-              </div>
-              <form class="options-form" id="optionsForm">
-                <label class="field-span">
-                  <span>Default naming format</span>
-                  <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
-                </label>
-                <button class="primary-action" type="submit">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM12 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm3-10H5V5h10v4Z"/></svg>
-                  <span>Save defaults</span>
-                </button>
-                <div class="variable-list field-span" id="namingVariables"></div>
-              </form>
-            </section>
-
             <section class="panel activity-panel" id="activitySection" aria-label="Activity">
               <div class="panel-heading">
                 <div>
@@ -248,6 +234,32 @@
               </div>
               <div class="event-list" id="eventList"></div>
             </section>
+          </div>
+        </aside>
+
+        <aside class="settings-drawer hidden" id="settingsDrawer" aria-label="Global options" aria-hidden="true" role="dialog">
+          <div class="settings-drawer-inner">
+            <div class="settings-drawer-heading">
+              <div>
+                <h2>Global naming defaults</h2>
+                <p>Set the template new series should inherit before custom overrides are applied.</p>
+              </div>
+              <button class="icon-button settings-drawer-close" id="settingsDrawerClose" type="button" aria-label="Close settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+              </button>
+            </div>
+
+            <form class="options-form" id="optionsForm">
+              <label class="field-span">
+                <span>Default naming format</span>
+                <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
+              </label>
+              <button class="primary-action" type="submit">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM12 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm3-10H5V5h10v4Z"/></svg>
+                <span>Save defaults</span>
+              </button>
+              <div class="variable-list field-span" id="namingVariables"></div>
+            </form>
           </div>
         </aside>
 
