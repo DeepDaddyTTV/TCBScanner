@@ -596,8 +596,7 @@ function renderSeriesFocus() {
   const useMockupArt = seriesSlug === "one-piece";
   const focusArtUrl = useMockupArt ? "/static/mockup_assets/hero-art.png" : heroUrl;
   const focusDensityClass = getFocusDensityClass(selected.title);
-  const focusEmblemClass = `focus-emblem${useMockupArt ? " mockup-emblem" : " cover-emblem"}`;
-  const focusEmblemMarkup = getFocusEmblemMarkup(selected, art, useMockupArt);
+  const focusEmblem = getFocusEmblem(selected, art, useMockupArt);
   const artStyle = focusArtUrl
     ? ` style="--focus-art: url('${focusArtUrl.replaceAll("'", "%27")}')"`
     : "";
@@ -610,7 +609,7 @@ function renderSeriesFocus() {
       <div class="focus-watermark" aria-hidden="true"></div>
       <div class="focus-banner">
         <div class="focus-aside">
-          <div class="${focusEmblemClass}" aria-hidden="true">${focusEmblemMarkup}</div>
+          <div class="${focusEmblem.className}" aria-hidden="true">${focusEmblem.markup}</div>
           <span class="status-pill status-${statusClass}">${statusText}</span>
         </div>
         <div class="focus-copy">
@@ -1282,17 +1281,19 @@ function getFocusDensityClass(title) {
   return "";
 }
 
-function getFocusEmblemMarkup(series, art, useMockupArt) {
-  if (useMockupArt) {
-    return icons.pirate;
-  }
-
+function getFocusEmblem(series, art, useMockupArt) {
   const coverUrl = getMockupCoverUrl(series) || selectArtworkUrl(art, "cover");
   if (coverUrl) {
-    return `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`;
+    return {
+      className: "focus-emblem cover-emblem",
+      markup: `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`,
+    };
   }
 
-  return `<div class="series-mark">${escapeHtml(seriesMark(series?.title))}</div>`;
+  return {
+    className: `focus-emblem${useMockupArt ? " mockup-emblem" : ""}`,
+    markup: `<div class="series-mark">${escapeHtml(seriesMark(series?.title))}</div>`,
+  };
 }
 
 function getHostLabel(url) {

@@ -4391,20 +4391,15 @@ select,
 
 .theme-select-caret {
   display: block;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 10px;
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
   margin-left: auto;
+  margin-top: -2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
   pointer-events: none;
-  overflow: visible;
-}
-
-.theme-select-caret path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .series-card {
