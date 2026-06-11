@@ -78,6 +78,11 @@ const themeMediaQuery =
   typeof window.matchMedia === "function"
     ? window.matchMedia("(prefers-color-scheme: dark)")
     : null;
+const themeLabels = {
+  light: "Light",
+  dark: "Dark",
+  system: "System",
+};
 const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 let noticeTimer = null;
 let artQueue = Promise.resolve();
@@ -1140,15 +1145,35 @@ function resolveThemeChoice(theme) {
 }
 
 function syncThemeSelector(theme) {
-  const select = $("#themeSelect");
-  if (select && select.value !== theme) {
-    select.value = theme;
+  const value = $("#themeSelectorValue");
+  if (value) {
+    value.textContent = themeLabels[theme] || themeLabels.light;
   }
 
   const icon = $("#themeModeIcon");
   if (icon) {
     icon.dataset.themeChoice = theme;
   }
+
+  const button = $("#themeMenuButton");
+  if (button) {
+    button.dataset.themeChoice = theme;
+  }
+
+  document.querySelectorAll("[data-theme-option]").forEach((option) => {
+    const isSelected = option.dataset.themeOption === theme;
+    option.dataset.selected = String(isSelected);
+    option.setAttribute("aria-selected", String(isSelected));
+  });
+}
+
+function toggleThemeMenu(forceOpen) {
+  const menu = $("#themeMenu");
+  const button = $("#themeMenuButton");
+  if (!menu || !button) return;
+  const isOpen = typeof forceOpen === "boolean" ? forceOpen : menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !isOpen);
+  button.setAttribute("aria-expanded", String(isOpen));
 }
 
 function setTheme(theme) {
@@ -1570,13 +1595,29 @@ $("#settingsDrawerClose").addEventListener("click", () => {
   toggleOptionsPanel(false);
 });
 
-$("#themeSelect").addEventListener("change", (event) => {
-  setTheme(event.target.value);
+$("#themeMenuButton").addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleThemeMenu();
+});
+
+$("#themeMenu").addEventListener("click", (event) => {
+  const option = event.target.closest("[data-theme-option]");
+  if (!option) return;
+  setTheme(option.dataset.themeOption);
+  toggleThemeMenu(false);
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    toggleThemeMenu(false);
     toggleOptionsPanel(false);
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const themeSelector = $(".theme-selector");
+  if (themeSelector && !themeSelector.contains(event.target)) {
+    toggleThemeMenu(false);
   }
 });
 

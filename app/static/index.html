@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/png" href="/static/branding/tcb-scanner-favicon.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260610d" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260611a" />
   </head>
   <body>
     <main class="app-shell">
@@ -89,18 +89,27 @@
                 <span class="ui-icon ui-icon-settings" aria-hidden="true"></span>
                 <span>Settings</span>
               </button>
-              <div class="toolbar-text-button theme-selector">
-                <label class="sr-only" for="themeSelect">Theme</label>
-                <span class="ui-icon theme-mode-icon" id="themeModeIcon" aria-hidden="true"></span>
-                <span class="theme-selector-label">Theme</span>
-                <span class="select-shell theme-select-shell">
-                  <select class="theme-select" id="themeSelect" aria-label="Theme">
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                    <option value="system">System</option>
-                  </select>
+              <div class="theme-selector">
+                <button class="toolbar-text-button theme-selector-trigger" id="themeMenuButton" type="button" aria-label="Theme" aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu">
+                  <span class="ui-icon theme-mode-icon" id="themeModeIcon" aria-hidden="true"></span>
+                  <span class="theme-selector-label">Theme</span>
+                  <span class="theme-selector-value" id="themeSelectorValue">Light</span>
                   <span class="select-caret theme-select-caret" aria-hidden="true"></span>
-                </span>
+                </button>
+                <div class="theme-menu hidden" id="themeMenu" role="listbox" aria-label="Theme">
+                  <button class="theme-menu-option" type="button" role="option" data-theme-option="light" aria-selected="true">
+                    <span class="theme-menu-check" aria-hidden="true">✓</span>
+                    <span>Light</span>
+                  </button>
+                  <button class="theme-menu-option" type="button" role="option" data-theme-option="dark" aria-selected="false">
+                    <span class="theme-menu-check" aria-hidden="true">✓</span>
+                    <span>Dark</span>
+                  </button>
+                  <button class="theme-menu-option" type="button" role="option" data-theme-option="system" aria-selected="false">
+                    <span class="theme-menu-check" aria-hidden="true">✓</span>
+                    <span>System</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -244,7 +253,7 @@
                 <h2>Global naming defaults</h2>
                 <p>Set the template new series should inherit before custom overrides are applied.</p>
               </div>
-              <button class="icon-button settings-drawer-close" id="settingsDrawerClose" type="button" aria-label="Close settings">
+              <button class="settings-drawer-close" id="settingsDrawerClose" type="button" aria-label="Close settings">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
               </button>
             </div>
@@ -276,6 +285,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260610c"></script>
+    <script src="/static/app.js?v=20260611a"></script>
   </body>
 </html>
