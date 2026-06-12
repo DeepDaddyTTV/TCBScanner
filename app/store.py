@@ -13,6 +13,7 @@ def utc_now() -> str:
 
 DEFAULT_NAMING_FORMAT = "{ChapterFullTitle}"
 LEGACY_DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
+SNAPSHOT_SCHEMA_VERSION = 1
 
 
 class Store:
@@ -399,6 +400,162 @@ class Store:
                 (series_id, chapter_id, level, message, utc_now()),
             )
 
+    def export_library_snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            settings = [
+                self._row_to_dict(row)
+                for row in self._conn.execute(
+                    "SELECT key, value FROM settings ORDER BY key"
+                ).fetchall()
+            ]
+            series = [
+                self._row_to_dict(row)
+                for row in self._conn.execute(
+                    "SELECT * FROM series ORDER BY id"
+                ).fetchall()
+            ]
+            chapters = [
+                self._row_to_dict(row)
+                for row in self._conn.execute(
+                    "SELECT * FROM chapters ORDER BY id"
+                ).fetchall()
+            ]
+            events = [
+                self._row_to_dict(row)
+                for row in self._conn.execute(
+                    "SELECT * FROM events ORDER BY id"
+                ).fetchall()
+            ]
+
+        return {
+            "app_name": "TCBScanner",
+            "schema_version": SNAPSHOT_SCHEMA_VERSION,
+            "exported_at": utc_now(),
+            "settings": settings,
+            "series": series,
+            "chapters": chapters,
+            "events": events,
+        }
+
+    def import_library_snapshot(self, payload: dict[str, Any]) -> dict[str, int]:
+        snapshot = self._normalize_snapshot(payload)
+
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM events")
+            self._conn.execute("DELETE FROM chapters")
+            self._conn.execute("DELETE FROM series")
+            self._conn.execute("DELETE FROM settings")
+
+            if snapshot["settings"]:
+                self._conn.executemany(
+                    "INSERT INTO settings (key, value) VALUES (?, ?)",
+                    [
+                        (row["key"], row["value"])
+                        for row in snapshot["settings"]
+                    ],
+                )
+
+            if snapshot["series"]:
+                self._conn.executemany(
+                    """
+                    INSERT INTO series (
+                        id, title, source_url, folder, check_interval_minutes,
+                        enabled, backfill_existing, initialized, created_at,
+                        last_checked_at, last_error, naming_format
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            row["id"],
+                            row["title"],
+                            row["source_url"],
+                            row["folder"],
+                            row["check_interval_minutes"],
+                            1 if row["enabled"] else 0,
+                            1 if row["backfill_existing"] else 0,
+                            1 if row["initialized"] else 0,
+                            row["created_at"],
+                            row["last_checked_at"],
+                            row["last_error"],
+                            row["naming_format"],
+                        )
+                        for row in snapshot["series"]
+                    ],
+                )
+
+            if snapshot["chapters"]:
+                self._conn.executemany(
+                    """
+                    INSERT INTO chapters (
+                        id, series_id, source_url, chapter_key, sort_key, display_title,
+                        status, cbz_path, page_count, discovered_at, downloaded_at, error
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            row["id"],
+                            row["series_id"],
+                            row["source_url"],
+                            row["chapter_key"],
+                            row["sort_key"],
+                            row["display_title"],
+                            row["status"],
+                            row["cbz_path"],
+                            row["page_count"],
+                            row["discovered_at"],
+                            row["downloaded_at"],
+                            row["error"],
+                        )
+                        for row in snapshot["chapters"]
+                    ],
+                )
+
+            if snapshot["events"]:
+                self._conn.executemany(
+                    """
+                    INSERT INTO events (
+                        id, series_id, chapter_id, level, message, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            row["id"],
+                            row["series_id"],
+                            row["chapter_id"],
+                            row["level"],
+                            row["message"],
+                            row["created_at"],
+                        )
+                        for row in snapshot["events"]
+                    ],
+                )
+
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO settings (key, value)
+                VALUES ('default_naming_format', ?)
+                """,
+                (DEFAULT_NAMING_FORMAT,),
+            )
+            self._conn.execute(
+                """
+                UPDATE settings
+                SET value = ?
+                WHERE key = 'default_naming_format' AND value = ?
+                """,
+                (DEFAULT_NAMING_FORMAT, LEGACY_DEFAULT_NAMING_FORMAT),
+            )
+
+        return {
+            "series": len(snapshot["series"]),
+            "chapters": len(snapshot["chapters"]),
+            "events": len(snapshot["events"]),
+            "settings": len(snapshot["settings"]),
+        }
+
     def list_events(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
@@ -413,6 +570,244 @@ class Store:
                 (limit,),
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def _normalize_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Imported library must be a JSON object.")
+
+        settings = self._normalize_settings_rows(payload.get("settings", []))
+        series = self._normalize_series_rows(payload.get("series", []))
+        series_ids = {row["id"] for row in series}
+        chapters = self._normalize_chapter_rows(payload.get("chapters", []), series_ids)
+        chapter_ids = {row["id"] for row in chapters}
+        events = self._normalize_event_rows(
+            payload.get("events", []),
+            series_ids,
+            chapter_ids,
+        )
+
+        return {
+            "settings": settings,
+            "series": series,
+            "chapters": chapters,
+            "events": events,
+        }
+
+    def _normalize_settings_rows(self, raw: Any) -> list[dict[str, str]]:
+        if isinstance(raw, dict):
+            items = raw.items()
+        elif isinstance(raw, list):
+            items = []
+            for row in raw:
+                if not isinstance(row, dict):
+                    raise ValueError("Snapshot settings rows must be objects.")
+                items.append((row.get("key"), row.get("value")))
+        else:
+            raise ValueError("Snapshot settings must be a list or object.")
+
+        normalized: list[dict[str, str]] = []
+        seen_keys: set[str] = set()
+        for key, value in items:
+            clean_key = self._require_text(key, "Setting key")
+            if clean_key in seen_keys:
+                raise ValueError(f"Duplicate setting key found: {clean_key}")
+            seen_keys.add(clean_key)
+            normalized.append(
+                {
+                    "key": clean_key,
+                    "value": "" if value is None else str(value),
+                }
+            )
+        return normalized
+
+    def _normalize_series_rows(self, raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            raise ValueError("Snapshot series must be a list.")
+
+        normalized: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+        for row in raw:
+            if not isinstance(row, dict):
+                raise ValueError("Snapshot series rows must be objects.")
+            series_id = self._positive_int(row.get("id"), "Series id")
+            if series_id in seen_ids:
+                raise ValueError(f"Duplicate series id found: {series_id}")
+            seen_ids.add(series_id)
+            normalized.append(
+                {
+                    "id": series_id,
+                    "title": self._require_text(row.get("title"), "Series title"),
+                    "source_url": self._require_text(row.get("source_url"), "Series source URL"),
+                    "folder": self._require_text(row.get("folder"), "Series folder"),
+                    "check_interval_minutes": max(
+                        1,
+                        self._positive_int(
+                            row.get("check_interval_minutes", 60),
+                            "Series check interval",
+                        ),
+                    ),
+                    "enabled": self._coerce_bool(row.get("enabled", True), "Series enabled"),
+                    "backfill_existing": self._coerce_bool(
+                        row.get("backfill_existing", False),
+                        "Series backfill_existing",
+                    ),
+                    "initialized": self._coerce_bool(
+                        row.get("initialized", False),
+                        "Series initialized",
+                    ),
+                    "created_at": self._require_text(row.get("created_at"), "Series created_at"),
+                    "last_checked_at": self._optional_text(row.get("last_checked_at")),
+                    "last_error": self._optional_text(row.get("last_error")),
+                    "naming_format": self._optional_compact_text(row.get("naming_format")),
+                }
+            )
+        return normalized
+
+    def _normalize_chapter_rows(
+        self,
+        raw: Any,
+        series_ids: set[int],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            raise ValueError("Snapshot chapters must be a list.")
+
+        normalized: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+        for row in raw:
+            if not isinstance(row, dict):
+                raise ValueError("Snapshot chapter rows must be objects.")
+            chapter_id = self._positive_int(row.get("id"), "Chapter id")
+            if chapter_id in seen_ids:
+                raise ValueError(f"Duplicate chapter id found: {chapter_id}")
+            seen_ids.add(chapter_id)
+            series_id = self._positive_int(row.get("series_id"), "Chapter series_id")
+            if series_id not in series_ids:
+                raise ValueError(f"Chapter {chapter_id} references missing series {series_id}.")
+            status = self._require_text(row.get("status", "pending"), "Chapter status").lower()
+            if status not in {"pending", "downloading", "downloaded", "failed", "skipped"}:
+                raise ValueError(f"Chapter {chapter_id} has unsupported status: {status}")
+            normalized.append(
+                {
+                    "id": chapter_id,
+                    "series_id": series_id,
+                    "source_url": self._require_text(row.get("source_url"), "Chapter source URL"),
+                    "chapter_key": self._require_text(row.get("chapter_key"), "Chapter key"),
+                    "sort_key": self._float_value(row.get("sort_key", 0), "Chapter sort_key"),
+                    "display_title": self._require_text(
+                        row.get("display_title"),
+                        "Chapter display title",
+                    ),
+                    "status": status,
+                    "cbz_path": self._optional_text(row.get("cbz_path")),
+                    "page_count": self._non_negative_int(
+                        row.get("page_count", 0),
+                        "Chapter page_count",
+                    ),
+                    "discovered_at": self._require_text(
+                        row.get("discovered_at"),
+                        "Chapter discovered_at",
+                    ),
+                    "downloaded_at": self._optional_text(row.get("downloaded_at")),
+                    "error": self._optional_text(row.get("error")),
+                }
+            )
+        return normalized
+
+    def _normalize_event_rows(
+        self,
+        raw: Any,
+        series_ids: set[int],
+        chapter_ids: set[int],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            raise ValueError("Snapshot events must be a list.")
+
+        normalized: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+        for row in raw:
+            if not isinstance(row, dict):
+                raise ValueError("Snapshot event rows must be objects.")
+            event_id = self._positive_int(row.get("id"), "Event id")
+            if event_id in seen_ids:
+                raise ValueError(f"Duplicate event id found: {event_id}")
+            seen_ids.add(event_id)
+            series_id = self._optional_fk(row.get("series_id"), "Event series_id")
+            chapter_id = self._optional_fk(row.get("chapter_id"), "Event chapter_id")
+            if series_id is not None and series_id not in series_ids:
+                raise ValueError(f"Event {event_id} references missing series {series_id}.")
+            if chapter_id is not None and chapter_id not in chapter_ids:
+                raise ValueError(f"Event {event_id} references missing chapter {chapter_id}.")
+            normalized.append(
+                {
+                    "id": event_id,
+                    "series_id": series_id,
+                    "chapter_id": chapter_id,
+                    "level": self._require_text(row.get("level", "info"), "Event level").lower(),
+                    "message": self._require_text(row.get("message"), "Event message"),
+                    "created_at": self._require_text(row.get("created_at"), "Event created_at"),
+                }
+            )
+        return normalized
+
+    def _require_text(self, value: Any, label: str) -> str:
+        clean = " ".join(str(value or "").strip().split())
+        if not clean:
+            raise ValueError(f"{label} is required.")
+        return clean
+
+    def _optional_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        clean = str(value).strip()
+        return clean or None
+
+    def _optional_compact_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        clean = " ".join(str(value).strip().split())
+        return clean or None
+
+    def _positive_int(self, value: Any, label: str) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be an integer.") from exc
+        if parsed <= 0:
+            raise ValueError(f"{label} must be greater than zero.")
+        return parsed
+
+    def _non_negative_int(self, value: Any, label: str) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be an integer.") from exc
+        if parsed < 0:
+            raise ValueError(f"{label} must be zero or greater.")
+        return parsed
+
+    def _float_value(self, value: Any, label: str) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be a number.") from exc
+
+    def _optional_fk(self, value: Any, label: str) -> int | None:
+        if value is None or value == "":
+            return None
+        return self._positive_int(value, label)
+
+    def _coerce_bool(self, value: Any, label: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off", ""}:
+                return False
+        raise ValueError(f"{label} must be true or false.")
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)

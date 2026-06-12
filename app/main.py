@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -25,7 +25,7 @@ SCHEDULER_INTERVAL_HOURS = max(
     float(os.getenv("TCB_SCHEDULER_INTERVAL_HOURS", "1")),
 )
 REQUEST_DELAY = max(0.2, float(os.getenv("TCB_REQUEST_DELAY", "0.8")))
-APP_VERSION = (os.getenv("APP_VERSION", "dev").strip() or "dev")
+APP_VERSION = (os.getenv("APP_VERSION", "0.2.0").strip() or "0.2.0")
 NAMING_VARIABLES = [
     {
         "name": "SeriesName",
@@ -161,6 +161,30 @@ async def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
         " ".join(payload.default_naming_format.strip().split()),
     )
     return await get_settings()
+
+
+@app.get("/api/library/export")
+async def export_library() -> JSONResponse:
+    snapshot = store.export_library_snapshot()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return JSONResponse(
+        content=snapshot,
+        headers={
+            "Content-Disposition": f'attachment; filename="tcbscanner-library-{timestamp}.json"'
+        },
+    )
+
+
+@app.post("/api/library/import")
+async def import_library(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        counts = store.import_library_snapshot(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "counts": counts,
+    }
 
 
 @app.post("/api/series")
@@ -321,7 +345,7 @@ def parse_datetime(value: object) -> datetime | None:
 def display_version(value: str) -> str:
     cleaned = str(value or "").strip()
     if not cleaned:
-        return "dev"
+        return "0.2.0"
     if re.fullmatch(r"[0-9a-f]{40}", cleaned):
         return cleaned[:7]
     return cleaned

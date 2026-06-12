@@ -57,8 +57,8 @@ const state = {
   series: [],
   events: [],
   meta: {
-    version: "dev",
-    version_label: "dev",
+    version: "0.2.0",
+    version_label: "0.2.0",
     supported_source_count: 0,
     supported_sources: [],
   },
@@ -492,6 +492,47 @@ function renderSettings() {
         `,
       )
       .join("");
+  }
+
+  const supportedSites = $("#supportedSitesList");
+  if (supportedSites) {
+    const groups = state.meta.supported_sources || [];
+    supportedSites.innerHTML = groups.length
+      ? groups
+          .map(
+            (group) => `
+              <section class="supported-site-group">
+                <div class="supported-site-group-head">
+                  <strong>${escapeHtml(group.family || group.provider || "Supported sources")}</strong>
+                  <span>${Number(group.count || 0)} site${Number(group.count || 0) === 1 ? "" : "s"}</span>
+                </div>
+                <div class="supported-site-list">
+                  ${(group.sites || [])
+                    .map(
+                      (site) => `
+                        <a
+                          class="supported-site-link"
+                          href="${escapeHtml(site.url || `https://${site.domain}/`)}"
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          <span>${escapeHtml(site.name || site.domain || "Unknown source")}</span>
+                          <small>${escapeHtml(site.domain || "")}</small>
+                        </a>
+                      `,
+                    )
+                    .join("")}
+                </div>
+              </section>
+            `,
+          )
+          .join("")
+      : `
+          <div class="inline-alert">
+            <strong>No source metadata available</strong>
+            <p>The current build did not return a supported-site list.</p>
+          </div>
+        `;
   }
 }
 
@@ -1217,7 +1258,7 @@ function renderStatusStrip() {
   if (!primary || !version || !secondary) return;
 
   primary.textContent = state.isRefreshing ? "Refreshing scanner" : "Engine idle";
-  version.textContent = `Version ${state.meta.version_label || "dev"}`;
+  version.textContent = `Version ${state.meta.version_label || "0.2.0"}`;
   secondary.textContent = getNextScanLabel();
 }
 
@@ -1474,6 +1515,53 @@ function clearNotice() {
   bar.textContent = "";
 }
 
+function fileNameFromDisposition(value) {
+  const match = /filename=\"?([^\";]+)\"?/i.exec(String(value || ""));
+  return match?.[1] || "";
+}
+
+async function exportLibrarySnapshot() {
+  const response = await fetch("/api/library/export", {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Unable to export the library.");
+  }
+
+  const blob = await response.blob();
+  const fileName =
+    fileNameFromDisposition(response.headers.get("Content-Disposition")) ||
+    `tcbscanner-library-${new Date().toISOString().replaceAll(":", "-")}.json`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importLibrarySnapshot(file) {
+  if (!file) return null;
+  const raw = await file.text();
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    throw new Error("The selected file is not valid JSON.");
+  }
+
+  const result = await api("/api/library/import", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return result.counts || { series: 0, chapters: 0, events: 0, settings: 0 };
+}
+
 function handleError(error, prefix = "Something went wrong.") {
   console.error(error);
   const suffix = error instanceof Error ? error.message : String(error);
@@ -1523,6 +1611,37 @@ listen($("#optionsForm"), "submit", async (event) => {
   setNotice("Global naming defaults saved.", "success");
   await refreshAll({ quiet: true });
   toggleOptionsPanel(false);
+});
+
+listen($("#exportLibraryButton"), "click", async () => {
+  await exportLibrarySnapshot();
+  setNotice("Library snapshot exported.", "success");
+});
+
+$("#importLibraryButton").addEventListener("click", () => {
+  $("#importLibraryFile").click();
+});
+
+listen($("#importLibraryFile"), "change", async (event) => {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const confirmed = window.confirm(
+    "Importing a library snapshot will replace your entire current library, activity history, and saved settings. Continue?",
+  );
+  if (!confirmed) {
+    input.value = "";
+    return;
+  }
+
+  const counts = await importLibrarySnapshot(file);
+  input.value = "";
+  setNotice(
+    `Imported ${Number(counts?.series || 0)} series and ${Number(counts?.chapters || 0)} chapters from the snapshot.`,
+    "success",
+  );
+  await refreshAll({ quiet: true });
 });
 
 listen($("#seriesList"), "click", async (event) => {

@@ -131,6 +131,7 @@ def list_supported_sources() -> list[dict[str, object]]:
                 {
                     "name": site["name"],
                     "domain": site["domain"],
+                    "url": site.get("url") or f"https://{site['domain']}/",
                 }
                 for site in group["sites"]
             ],

@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/png" href="/static/branding/tcb-scanner-favicon.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260611j" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260611k" />
   </head>
   <body>
     <main class="app-shell">
@@ -250,31 +250,74 @@
           <div class="settings-drawer-inner">
             <div class="settings-drawer-heading">
               <div>
-                <h2>Global naming defaults</h2>
-                <p>Set the template new series should inherit before custom overrides are applied.</p>
+                <h2>Settings</h2>
+                <p>Adjust naming defaults, back up your library, and review every supported source.</p>
               </div>
               <button class="settings-drawer-close" id="settingsDrawerClose" type="button" aria-label="Close settings">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
               </button>
             </div>
 
-            <form class="options-form" id="optionsForm">
-              <label class="field-span">
-                <span>Default naming format</span>
-                <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
-              </label>
-              <button class="primary-action" type="submit">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM12 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm3-10H5V5h10v4Z"/></svg>
-                <span>Save defaults</span>
-              </button>
-              <div class="variable-list field-span" id="namingVariables"></div>
-            </form>
+            <div class="settings-drawer-scroll">
+              <section class="settings-section">
+                <div class="settings-section-heading">
+                  <div>
+                    <h3>Default naming</h3>
+                    <p>Set the template new series inherit before any per-series override is applied.</p>
+                  </div>
+                </div>
+
+                <form class="options-form" id="optionsForm">
+                  <label class="field-span">
+                    <span>Default naming format</span>
+                    <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
+                  </label>
+                  <button class="primary-action" type="submit">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM12 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm3-10H5V5h10v4Z"/></svg>
+                    <span>Save defaults</span>
+                  </button>
+                  <div class="variable-list field-span" id="namingVariables"></div>
+                </form>
+              </section>
+
+              <section class="settings-section">
+                <div class="settings-section-heading">
+                  <div>
+                    <h3>Library backup</h3>
+                    <p>Export your full monitored library to JSON or import one to fully replace the current library.</p>
+                  </div>
+                </div>
+
+                <div class="settings-action-grid">
+                  <button class="small-action" id="exportLibraryButton" type="button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v10l3.5-3.5 1.4 1.4L12 18.8l-5.9-5.9 1.4-1.4L11 13V3Zm-6 16h14v2H5v-2Z"/></svg>
+                    <span>Export library JSON</span>
+                  </button>
+                  <button class="small-action" id="importLibraryButton" type="button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 21h-2V11L7.5 14.5l-1.4-1.4L12 7.2l5.9 5.9-1.4 1.4L13 11v10ZM5 3h14v2H5V3Z"/></svg>
+                    <span>Import replacement JSON</span>
+                  </button>
+                  <input class="visually-hidden-file" id="importLibraryFile" type="file" accept="application/json,.json" />
+                </div>
+                <p class="settings-warning">Importing a snapshot replaces all tracked series, indexed chapters, activity history, and saved settings.</p>
+              </section>
+
+              <section class="settings-section">
+                <div class="settings-section-heading">
+                  <div>
+                    <h3>Supported sites</h3>
+                    <p>Current source list wired into this build.</p>
+                  </div>
+                </div>
+                <div class="supported-site-groups" id="supportedSitesList"></div>
+              </section>
+            </div>
           </div>
         </aside>
 
         <footer class="status-strip" id="statusStrip" aria-live="polite">
           <span class="status-primary" id="statusPrimary">Engine idle</span>
-          <span class="status-version" id="statusVersion">Version dev</span>
+          <span class="status-version" id="statusVersion">Version 0.2.0</span>
           <span class="status-secondary" id="statusSecondary">Next scan pending</span>
         </footer>
       </div>
@@ -286,6 +329,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260611j"></script>
+    <script src="/static/app.js?v=20260611k"></script>
   </body>
 </html>

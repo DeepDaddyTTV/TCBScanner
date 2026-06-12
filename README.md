@@ -62,7 +62,7 @@ Supported environment variables:
 - `WORK_DIR`: Container path for temporary image downloads before packaging. Default: `/data/work`.
 - `TCB_SCHEDULER_INTERVAL_HOURS`: How often the background scheduler wakes up to look for due series, in hours. Default: `1`.
 - `TCB_REQUEST_DELAY`: Delay between source requests, in seconds. Default: `0.8`.
-- `APP_VERSION`: Version label shown in the footer. The GitHub image pipeline sets this automatically from the commit SHA.
+- `APP_VERSION`: Version label shown in the footer. The GitHub image pipeline sets this automatically as `0.2.x`, where `x` is the current repo revision count.
 
 ## Supported Sites
 
@@ -70,26 +70,26 @@ The current release supports 20 domains. This first wave focuses on the easiest 
 
 | Site | Domain | Provider family |
 | --- | --- | --- |
-| TCB One Piece Chapters | `tcbonepiecechapters.com` | Custom TCB HTML |
-| Mangalink | `linkmanga.com` | WordPress-style manga HTML |
-| PAWMANGA | `pawmanga.com` | WordPress-style manga HTML |
-| Mangaclash | `toonclash.com` | WordPress-style manga HTML |
-| Aqua Manga | `aquareader.org` | WordPress-style manga HTML |
-| Mangahot | `manhuahot.com` | WordPress-style manga HTML |
-| CoffeeManga | `coffeemanga.ink` | WordPress-style manga HTML |
-| MangaSushi | `mangasushi.org` | WordPress-style manga HTML |
-| Mangazin | `mangazin.org` | WordPress-style manga HTML |
-| Manhwatoon | `manhwatoon.me` | WordPress-style manga HTML |
-| Kingofshojo | `kingofshojo.com` | WordPress-style manga HTML |
-| Rokari Comics | `rokaricomics.com` | WordPress-style manga HTML |
-| Reset Scans | `reset-scans.org` | WordPress-style manga HTML |
-| Flame Scans | `flamescans.lol` | WordPress-style manga HTML |
-| Flame Comics | `flamecomics.xyz` | Next.js series HTML |
-| Mangack | `mangack.com` | WordPress-style manga HTML |
-| MangaRead | `mangaread.org` | WordPress-style manga HTML |
-| Lilymanga | `lilymanga.net` | WordPress-style manga HTML |
-| Rawkuma | `rawkuma.net` | WordPress-style manga HTML |
-| KDT Scans | `silentquill.net` | WordPress-style manga HTML |
+| [TCB One Piece Chapters](https://tcbonepiecechapters.com/) | `tcbonepiecechapters.com` | Custom TCB HTML |
+| [Mangalink](https://linkmanga.com/) | `linkmanga.com` | WordPress-style manga HTML |
+| [PAWMANGA](https://pawmanga.com/) | `pawmanga.com` | WordPress-style manga HTML |
+| [Mangaclash](https://toonclash.com/) | `toonclash.com` | WordPress-style manga HTML |
+| [Aqua Manga](https://aquareader.org/) | `aquareader.org` | WordPress-style manga HTML |
+| [Mangahot](https://manhuahot.com/) | `manhuahot.com` | WordPress-style manga HTML |
+| [CoffeeManga](https://coffeemanga.ink/) | `coffeemanga.ink` | WordPress-style manga HTML |
+| [MangaSushi](https://mangasushi.org/) | `mangasushi.org` | WordPress-style manga HTML |
+| [Mangazin](https://mangazin.org/) | `mangazin.org` | WordPress-style manga HTML |
+| [Manhwatoon](https://manhwatoon.me/) | `manhwatoon.me` | WordPress-style manga HTML |
+| [Kingofshojo](https://kingofshojo.com/) | `kingofshojo.com` | WordPress-style manga HTML |
+| [Rokari Comics](https://rokaricomics.com/) | `rokaricomics.com` | WordPress-style manga HTML |
+| [Reset Scans](https://reset-scans.org/) | `reset-scans.org` | WordPress-style manga HTML |
+| [Flame Scans](https://flamescans.lol/) | `flamescans.lol` | WordPress-style manga HTML |
+| [Flame Comics](https://flamecomics.xyz/) | `flamecomics.xyz` | Next.js series HTML |
+| [Mangack](https://mangack.com/) | `mangack.com` | WordPress-style manga HTML |
+| [MangaRead](https://mangaread.org/) | `mangaread.org` | WordPress-style manga HTML |
+| [Lilymanga](https://lilymanga.net/) | `lilymanga.net` | WordPress-style manga HTML |
+| [Rawkuma](https://rawkuma.net/) | `rawkuma.net` | WordPress-style manga HTML |
+| [KDT Scans](https://silentquill.net/) | `silentquill.net` | WordPress-style manga HTML |
 
 If a supported site changes its markup or introduces stricter bot protection, that site may need a provider refresh before scans succeed again.
 
@@ -127,6 +127,8 @@ Each series card also has a `Monitor` checkbox. Turn it on to keep checking for 
 
 Open the options menu in the web app to set the default CBZ naming format for every series. Each series card also has a `Naming format` field; leave it blank to use the default, or set a series-specific override.
 
+The settings drawer also includes full-library JSON export/import controls. Import replaces the existing library, chapter index, activity history, and saved settings, so it works best for backups or sharing a full curated library state.
+
 Default:
 
 ```text
@@ -155,8 +157,11 @@ Unknown variables are ignored. File names are sanitized before writing to the ma
 
 - `GET /api/series`
 - `POST /api/series`
+- `GET /api/meta`
 - `GET /api/settings`
 - `POST /api/settings`
+- `GET /api/library/export`
+- `POST /api/library/import`
 - `DELETE /api/series/{series_id}`
 - `GET /api/series/{series_id}/chapters`
 - `POST /api/series/{series_id}/check`
