@@ -148,8 +148,6 @@ code {
   align-items: start;
   max-width: 1680px;
   margin: 0 auto;
-  perspective: 2600px;
-  perspective-origin: right center;
 }
 
 .panel,
@@ -4509,7 +4507,6 @@ select,
   grid-column: 3;
   grid-row: 1 / span 2;
   z-index: 30;
-  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -4518,47 +4515,12 @@ select,
     linear-gradient(180deg, rgba(255, 255, 255, 0.24), transparent 16%),
     var(--panel-strong);
   box-shadow: -18px 0 36px rgba(25, 20, 16, 0.16);
-  transform: rotateY(0deg) translateX(0);
-  transform-origin: left center;
-  transform-style: preserve-3d;
-  backface-visibility: hidden;
-  isolation: isolate;
-  will-change: transform, opacity, filter;
+  transform-origin: right top;
+  will-change: transform, opacity;
 }
 
-.settings-drawer::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(
-      90deg,
-      rgba(34, 24, 18, 0.22) 0,
-      rgba(34, 24, 18, 0.1) 4%,
-      rgba(255, 255, 255, 0.02) 18%,
-      transparent 34%,
-      transparent 72%,
-      rgba(255, 255, 255, 0.09) 100%
-    );
-  opacity: 0;
-  pointer-events: none;
-}
-
-.settings-drawer.is-opening {
-  animation: settings-drawer-page-open 580ms cubic-bezier(0.22, 0.74, 0.14, 1) both;
-}
-
-.settings-drawer.is-opening::before {
-  animation: settings-drawer-page-sheen-open 580ms ease-out both;
-}
-
-.settings-drawer.is-closing {
-  pointer-events: none;
-  animation: settings-drawer-page-close 460ms cubic-bezier(0.48, 0.08, 0.78, 0.22) both;
-}
-
-.settings-drawer.is-closing::before {
-  animation: settings-drawer-page-sheen-close 460ms ease-in both;
+.settings-drawer:not(.hidden) {
+  animation: settings-drawer-slide-in 240ms cubic-bezier(0.18, 0.82, 0.28, 1);
 }
 
 .settings-drawer-inner {
@@ -5107,77 +5069,15 @@ select,
   }
 }
 
-@keyframes settings-drawer-page-open {
+@keyframes settings-drawer-slide-in {
   from {
     opacity: 0;
-    transform: rotateY(-88deg) translateX(22px) scaleX(0.96);
-    filter: brightness(0.94) saturate(0.9);
-    box-shadow: -4px 0 16px rgba(25, 20, 16, 0.1);
-  }
-
-  38% {
-    opacity: 1;
-    transform: rotateY(-38deg) translateX(8px) scaleX(0.985);
-    filter: brightness(0.98) saturate(0.96);
-    box-shadow: -10px 0 22px rgba(25, 20, 16, 0.14);
+    transform: translateX(30px);
   }
 
   to {
     opacity: 1;
-    transform: rotateY(0deg) translateX(0) scaleX(1);
-    filter: brightness(1) saturate(1);
-    box-shadow: -18px 0 36px rgba(25, 20, 16, 0.16);
-  }
-}
-
-@keyframes settings-drawer-page-close {
-  from {
-    opacity: 1;
-    transform: rotateY(0deg) translateX(0) scaleX(1);
-    filter: brightness(1) saturate(1);
-    box-shadow: -18px 0 36px rgba(25, 20, 16, 0.16);
-  }
-
-  48% {
-    opacity: 1;
-    transform: rotateY(-26deg) translateX(6px) scaleX(0.992);
-    filter: brightness(0.985) saturate(0.97);
-    box-shadow: -10px 0 22px rgba(25, 20, 16, 0.14);
-  }
-
-  to {
-    opacity: 0;
-    transform: rotateY(-88deg) translateX(22px) scaleX(0.96);
-    filter: brightness(0.94) saturate(0.9);
-    box-shadow: -4px 0 16px rgba(25, 20, 16, 0.1);
-  }
-}
-
-@keyframes settings-drawer-page-sheen-open {
-  from {
-    opacity: 0.52;
-  }
-
-  44% {
-    opacity: 0.24;
-  }
-
-  to {
-    opacity: 0.08;
-  }
-}
-
-@keyframes settings-drawer-page-sheen-close {
-  from {
-    opacity: 0.08;
-  }
-
-  42% {
-    opacity: 0.26;
-  }
-
-  to {
-    opacity: 0.48;
+    transform: translateX(0);
   }
 }
 

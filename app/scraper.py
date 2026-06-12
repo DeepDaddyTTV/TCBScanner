@@ -4,6 +4,7 @@ import asyncio
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from html import unescape
 from pathlib import PurePosixPath
 from urllib.parse import urljoin, urlparse
 
@@ -15,6 +16,12 @@ HEADERS = {
     "User-Agent": "TCB-CBZ-Monitor/1.0 (+local personal archiver)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+}
+
+BROWSERLIKE_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": HEADERS["Accept"],
+    "Accept-Language": HEADERS["Accept-Language"],
 }
 
 TCB_SITES = (
@@ -43,6 +50,21 @@ WORDPRESS_MANGA_SITES = (
     {"name": "Lilymanga", "domain": "lilymanga.net"},
     {"name": "Rawkuma", "domain": "rawkuma.net"},
     {"name": "KDT Scans", "domain": "silentquill.net"},
+    {"name": "Galaxy Manga", "domain": "galaxymanga.io"},
+)
+
+TODAY_BOOK_SITES = (
+    {"name": "Today Manga", "domain": "todaymanga.com"},
+)
+
+SERIALIZED_COMIC_SITES = (
+    {"name": "Temple Scan", "domain": "templescan.net"},
+    {
+        "name": "Diva Scans",
+        "domain": "divascans.org",
+        "aliases": ["divascans.com"],
+        "url": "https://divascans.com/",
+    },
 )
 
 NEXT_SERIES_SITES = (
@@ -59,6 +81,16 @@ SUPPORTED_SOURCE_GROUPS = (
         "provider": "wordpress_manga",
         "family": "WordPress-style manga HTML",
         "sites": WORDPRESS_MANGA_SITES,
+    },
+    {
+        "provider": "today_book",
+        "family": "Book chapter-list HTML",
+        "sites": TODAY_BOOK_SITES,
+    },
+    {
+        "provider": "serialized_comic",
+        "family": "Serialized comic HTML",
+        "sites": SERIALIZED_COMIC_SITES,
     },
     {
         "provider": "next_series",
@@ -104,10 +136,15 @@ class PageImage:
 
 
 async def fetch_html(url: str) -> str:
-    async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.text
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.text
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 403:
+            raise
+    return await asyncio.to_thread(fetch_html_with_requests, url)
 
 
 async def fetch_bytes(url: str, *, referer: str | None = None) -> tuple[bytes, str]:
@@ -115,10 +152,35 @@ async def fetch_bytes(url: str, *, referer: str | None = None) -> tuple[bytes, s
     headers["Accept"] = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
     if referer:
         headers["Referer"] = referer
-    async with httpx.AsyncClient(headers=headers, timeout=60, follow_redirects=True) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.content, response.headers.get("content-type", "")
+    try:
+        async with httpx.AsyncClient(headers=headers, timeout=60, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.content, response.headers.get("content-type", "")
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 403:
+            raise
+    return await asyncio.to_thread(fetch_bytes_with_requests, url, referer)
+
+
+def fetch_html_with_requests(url: str) -> str:
+    import requests
+
+    response = requests.get(url, headers=BROWSERLIKE_HEADERS, timeout=30, allow_redirects=True)
+    response.raise_for_status()
+    return response.text
+
+
+def fetch_bytes_with_requests(url: str, referer: str | None = None) -> tuple[bytes, str]:
+    import requests
+
+    headers = dict(BROWSERLIKE_HEADERS)
+    headers["Accept"] = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    if referer:
+        headers["Referer"] = referer
+    response = requests.get(url, headers=headers, timeout=60, allow_redirects=True)
+    response.raise_for_status()
+    return response.content, response.headers.get("content-type", "")
 
 
 def list_supported_sources() -> list[dict[str, object]]:
@@ -154,6 +216,10 @@ async def discover_chapters(
         return await discover_tcb_chapters(source_url, request_delay=request_delay)
     if provider == "wordpress_manga":
         return await discover_wordpress_chapters(source_url, request_delay=request_delay)
+    if provider == "today_book":
+        return await discover_today_book_chapters(source_url, request_delay=request_delay)
+    if provider == "serialized_comic":
+        return await discover_serialized_comic_chapters(source_url, request_delay=request_delay)
     if provider == "next_series":
         return await discover_next_series_chapters(source_url, request_delay=request_delay)
     raise ValueError("This site is not in the current supported source list.")
@@ -165,6 +231,10 @@ def parse_page_images(html: str, base_url: str) -> list[dict[str, object]]:
         return parse_tcb_page_images(html, base_url)
     if provider == "wordpress_manga":
         return parse_wordpress_page_images(html, base_url)
+    if provider == "today_book":
+        return parse_today_book_page_images(html, base_url)
+    if provider == "serialized_comic":
+        return parse_serialized_comic_page_images(html, base_url)
     if provider == "next_series":
         return parse_next_series_page_images(html, base_url)
     raise ValueError("This chapter source is not supported.")
@@ -286,6 +356,75 @@ async def discover_next_series_chapters(
     raise ValueError("No chapter links were found on that page.")
 
 
+async def discover_today_book_chapters(
+    source_url: str,
+    *,
+    request_delay: float = 0.0,
+) -> tuple[str, list[dict[str, object]]]:
+    html = await fetch_html(source_url)
+    page_url = source_url
+
+    series_url = derive_today_book_series_url(source_url)
+    if series_url and normalize_url(series_url) != normalize_url(source_url):
+        if request_delay > 0:
+            await asyncio.sleep(request_delay)
+        page_url = series_url
+        html = await fetch_html(series_url)
+
+    chapters = parse_today_book_chapter_links(html, page_url)
+    if chapters:
+        return page_url, chapters
+
+    if is_today_book_chapter_url(source_url):
+        title = parse_chapter_title(html, source_url)
+        chapter_key, sort_key = parse_chapter_key(title, source_url)
+        return source_url, [
+            {
+                "url": source_url,
+                "title": title,
+                "chapter_key": chapter_key,
+                "sort_key": sort_key,
+            }
+        ]
+
+    raise ValueError("No chapter links were found on that page.")
+
+
+async def discover_serialized_comic_chapters(
+    source_url: str,
+    *,
+    request_delay: float = 0.0,
+) -> tuple[str, list[dict[str, object]]]:
+    html = await fetch_html(source_url)
+    page_url = source_url
+
+    if is_serialized_comic_chapter_url(source_url):
+        series_url = derive_serialized_comic_series_url(source_url)
+        if series_url and normalize_url(series_url) != normalize_url(source_url):
+            if request_delay > 0:
+                await asyncio.sleep(request_delay)
+            page_url = series_url
+            html = await fetch_html(series_url)
+
+    chapters = parse_serialized_comic_chapter_links(html, page_url)
+    if chapters:
+        return page_url, chapters
+
+    if is_serialized_comic_chapter_url(source_url):
+        title = parse_chapter_title(html, source_url)
+        chapter_key, sort_key = parse_chapter_key(title, source_url)
+        return source_url, [
+            {
+                "url": source_url,
+                "title": title,
+                "chapter_key": chapter_key,
+                "sort_key": sort_key,
+            }
+        ]
+
+    raise ValueError("No chapter links were found on that page.")
+
+
 def parse_tcb_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
     soup = BeautifulSoup(html, "lxml")
     found: dict[str, ChapterLink] = {}
@@ -328,6 +467,76 @@ def parse_wordpress_chapter_links(html: str, base_url: str) -> list[dict[str, ob
             title = title_from_url(url)
         chapter_key, sort_key = parse_chapter_key(title, url)
         found[url] = ChapterLink(url, title, chapter_key, sort_key)
+    return [
+        link.__dict__
+        for link in sorted(found.values(), key=lambda item: (item.sort_key, item.url))
+    ]
+
+
+def parse_today_book_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    target_slug = today_book_slug(base_url)
+    found: dict[str, ChapterLink] = {}
+    base_reference = f"{normalize_url(base_url).rstrip('/')}/"
+
+    for anchor in soup.find_all("a", href=True):
+        raw_href = str(anchor.get("href") or "").strip()
+        if not raw_href or raw_href.startswith("#") or "{" in raw_href:
+            continue
+
+        url = normalize_url(urljoin(base_reference, raw_href))
+        parsed = urlparse(url)
+        if parsed.query or not is_today_book_chapter_url(url):
+            continue
+        if target_slug and today_book_slug(url) != target_slug:
+            continue
+
+        title = " ".join(anchor.get_text(" ", strip=True).split())
+        if not title or title.lower() in {"prev", "next", "previous"}:
+            title = title_from_url(url)
+        chapter_key, sort_key = parse_chapter_key(title, url)
+        found[url] = ChapterLink(url, title, chapter_key, sort_key)
+
+    return [
+        link.__dict__
+        for link in sorted(found.values(), key=lambda item: (item.sort_key, item.url))
+    ]
+
+
+def parse_serialized_comic_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    target_series = derive_serialized_comic_series_url(base_url) or normalize_url(base_url)
+    found: dict[str, ChapterLink] = {}
+    base_reference = f"{normalize_url(base_url).rstrip('/')}/"
+    target_parts = [part for part in urlparse(target_series).path.split("/") if part]
+    target_slug = target_parts[-1] if target_parts else ""
+    target_origin = origin_from_url(target_series)
+
+    for anchor in soup.find_all("a", href=True):
+        raw_href = str(anchor.get("href") or "").strip()
+        if not raw_href or raw_href.startswith("#") or "{" in raw_href:
+            continue
+
+        url = normalize_url(urljoin(base_reference, raw_href))
+        if (
+            not is_serialized_comic_chapter_url(url)
+            and target_parts[:1] == ["comic"]
+            and target_slug
+            and raw_href.startswith(f"{target_slug}/")
+        ):
+            url = normalize_url(urljoin(f"{target_origin}/", f"/comic/{raw_href}"))
+        parsed = urlparse(url)
+        if parsed.query or not is_serialized_comic_chapter_url(url):
+            continue
+        if derive_serialized_comic_series_url(url) != target_series:
+            continue
+
+        title = " ".join(anchor.get_text(" ", strip=True).split())
+        if not title or title.lower() in {"prev", "next", "previous"}:
+            title = title_from_url(url)
+        chapter_key, sort_key = parse_chapter_key(title, url)
+        found[url] = ChapterLink(url, title, chapter_key, sort_key)
+
     return [
         link.__dict__
         for link in sorted(found.values(), key=lambda item: (item.sort_key, item.url))
@@ -448,13 +657,89 @@ def parse_wordpress_page_images(html: str, base_url: str) -> list[dict[str, obje
 
         page_number = (
             parse_page_number(alt)
-            or parse_numeric_filename(url)
+            or parse_page_number_from_url(url)
             or len(images) + 1
         )
         images.append(PageImage(url, page_number, extension_from_url(url)))
         seen.add(url)
 
-    images = prune_wordpress_page_images(images)
+    if len(images) < 3:
+        for url in extract_embedded_image_urls(html, base_url):
+            if url in seen or not looks_like_wordpress_page_image(url, ""):
+                continue
+            page_number = parse_page_number_from_url(url) or len(images) + 1
+            images.append(PageImage(url, page_number, extension_from_url(url)))
+            seen.add(url)
+
+    images = prune_page_images_by_bucket(images)
+    return [
+        page.__dict__
+        for page in sorted(images, key=lambda item: (item.page_number, item.url))
+    ]
+
+
+def parse_today_book_page_images(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    images: list[PageImage] = []
+    seen: set[str] = set()
+
+    for image in soup.find_all("img"):
+        raw_url = first_present(
+            image.get("data-src"),
+            image.get("data-lazy-src"),
+            image.get("src"),
+            first_srcset_url(image.get("data-srcset")),
+            first_srcset_url(image.get("srcset")),
+        )
+        if not raw_url:
+            continue
+
+        url = normalize_url(urljoin(base_url, str(raw_url).strip()))
+        if url in seen:
+            continue
+
+        alt = " ".join(str(image.get("alt") or image.get("title") or "").split())
+        if not looks_like_today_book_page_image(url, alt):
+            continue
+
+        page_number = (
+            parse_page_number(alt)
+            or parse_page_number_from_url(url)
+            or len(images) + 1
+        )
+        images.append(PageImage(url, page_number, extension_from_url(url)))
+        seen.add(url)
+
+    return [
+        page.__dict__
+        for page in sorted(images, key=lambda item: (item.page_number, item.url))
+    ]
+
+
+def parse_serialized_comic_page_images(html: str, base_url: str) -> list[dict[str, object]]:
+    images: list[PageImage] = []
+    seen: set[str] = set()
+
+    for url in extract_embedded_image_urls(html, base_url):
+        if url in seen or not looks_like_serialized_comic_page_image(url):
+            continue
+        page_number = parse_page_number_from_url(url) or len(images) + 1
+        images.append(PageImage(url, page_number, extension_from_url(url)))
+        seen.add(url)
+
+    all_images = list(images)
+    images = prune_page_images_by_bucket(images)
+    if images:
+        lowest_page = min(page.page_number for page in images)
+        if lowest_page > 1:
+            prefix_pages = [
+                page
+                for page in sorted(all_images, key=lambda item: (item.page_number, item.url))
+                if page.page_number < lowest_page
+                and page.url not in {existing.url for existing in images}
+            ]
+            if prefix_pages:
+                images = prefix_pages + images
     return [
         page.__dict__
         for page in sorted(images, key=lambda item: (item.page_number, item.url))
@@ -567,6 +852,8 @@ def looks_like_wordpress_page_image(url: str, alt: str) -> bool:
         return False
     if "wp-content/uploads/wp-manga/data/" in lowered_path:
         return True
+    if "/series/data/" in lowered_path:
+        return True
     if " page " in f" {lowered_alt} " or re.search(r"\bpage\s+\d+\b", lowered_alt):
         return True
     if WORDPRESS_NUMERIC_IMAGE.search(PurePosixPath(file_name).stem):
@@ -574,13 +861,44 @@ def looks_like_wordpress_page_image(url: str, alt: str) -> bool:
     return False
 
 
-def prune_wordpress_page_images(images: list[PageImage]) -> list[PageImage]:
+def looks_like_today_book_page_image(url: str, alt: str) -> bool:
+    lowered_alt = alt.lower()
+    parsed = urlparse(url)
+    lowered_path = parsed.path.lower()
+    lowered_host = parsed.netloc.lower()
+
+    if not lowered_host.endswith("todaymanga.com"):
+        return False
+    if any(token in lowered_path for token in ("/static/", "/posters/", "logo", "favicon", "avatar", "banner")):
+        return False
+    if " pic-" in f" {lowered_alt} " or re.search(r"\bpic[-_ ]?\d+\b", lowered_alt):
+        return True
+    return re.search(r"/\d+\.(?:jpg|jpeg|png|webp|gif)$", lowered_path) is not None
+
+
+def looks_like_serialized_comic_page_image(url: str) -> bool:
+    parsed = urlparse(url)
+    lowered_path = parsed.path.lower()
+    file_name = PurePosixPath(lowered_path).name
+
+    if "/series/" not in lowered_path:
+        return False
+    if not re.search(r"\.(?:jpg|jpeg|png|webp|gif)$", file_name):
+        return False
+    if any(token in lowered_path for token in ("cover-", "opengraph-image", "thumbnail", "icon", "favicon", "logo")):
+        return False
+    if "/chapters/" in lowered_path:
+        return True
+    return re.search(r"/\d{1,4}\.(?:jpg|jpeg|png|webp|gif)$", lowered_path) is not None
+
+
+def prune_page_images_by_bucket(images: list[PageImage]) -> list[PageImage]:
     if len(images) < 3:
         return images
 
     buckets: dict[str, list[PageImage]] = {}
     for image in images:
-        key = wordpress_image_bucket(image.url)
+        key = image_bucket(image.url)
         buckets.setdefault(key, []).append(image)
 
     ranked = sorted(
@@ -592,10 +910,30 @@ def prune_wordpress_page_images(images: list[PageImage]) -> list[PageImage]:
     return images
 
 
-def wordpress_image_bucket(url: str) -> str:
+def image_bucket(url: str) -> str:
     parsed = urlparse(url)
     parent = str(PurePosixPath(parsed.path).parent)
     return f"{parsed.netloc.lower()}::{parent}"
+
+
+def extract_embedded_image_urls(html: str, base_url: str) -> list[str]:
+    payload = unescape(html).replace("\\/", "/")
+    candidates = re.findall(r'(?:https?://|/)[^"\'\s<>]+', payload)
+    found: list[str] = []
+    seen: set[str] = set()
+
+    for candidate in candidates:
+        raw = candidate.rstrip("\\")
+        parsed = urlparse(raw)
+        if not re.search(r"\.(?:jpg|jpeg|png|webp|gif)$", parsed.path.lower()):
+            continue
+        url = normalize_url(urljoin(base_url, raw))
+        if url in seen:
+            continue
+        found.append(url)
+        seen.add(url)
+
+    return found
 
 
 def parse_numeric_filename(url: str) -> int | None:
@@ -607,6 +945,23 @@ def parse_numeric_filename(url: str) -> int | None:
         return int(match.group(1))
     except ValueError:
         return None
+
+
+def parse_page_number_from_url(url: str) -> int | None:
+    stem = PurePosixPath(urlparse(url).path).stem
+    tagged = re.search(r"(?:page|pic|image|img)[-_ ]?(\d+)", stem, re.IGNORECASE)
+    if tagged:
+        return int(tagged.group(1))
+
+    numeric = parse_numeric_filename(url)
+    if numeric is not None:
+        return numeric
+
+    path = PurePosixPath(urlparse(url).path)
+    for part in reversed(path.parts[:-1]):
+        if part.isdigit():
+            return int(part)
+    return None
 
 
 def parse_next_data_page_props(html: str) -> dict[str, object]:
@@ -690,7 +1045,7 @@ def origin_from_url(url: str) -> str:
 
 
 def parse_page_number(text: str) -> int | None:
-    match = re.search(r"\bpage\s+(\d+)\b", text, re.IGNORECASE)
+    match = re.search(r"\b(?:page|pic)\s*[-_]?\s*(\d+)\b", text, re.IGNORECASE)
     if not match:
         return None
     return int(match.group(1))
@@ -728,6 +1083,10 @@ def is_chapter_url(url: str) -> bool:
         return is_tcb_chapter_url(url)
     if provider == "wordpress_manga":
         return is_wordpress_chapter_url(url)
+    if provider == "today_book":
+        return is_today_book_chapter_url(url)
+    if provider == "serialized_comic":
+        return is_serialized_comic_chapter_url(url)
     if provider == "next_series":
         return is_next_series_chapter_url(url)
     return False
@@ -741,6 +1100,25 @@ def is_wordpress_chapter_url(url: str) -> bool:
     return looks_like_wordpress_chapter_path(urlparse(url).path)
 
 
+def is_today_book_chapter_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    return len(parts) >= 3 and parts[0].lower() == "book" and parts[2].lower().startswith("ch-")
+
+
+def is_serialized_comic_chapter_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    return (
+        len(parts) >= 3
+        and parts[0].lower() == "comic"
+        and parts[2].lower().startswith("chapter-")
+    ) or (
+        len(parts) >= 5
+        and parts[0].lower() == "series"
+        and parts[1].lower() == "comic"
+        and parts[3].lower() == "chapter"
+    )
+
+
 def is_next_series_chapter_url(url: str) -> bool:
     parts = [part for part in urlparse(url).path.split("/") if part]
     return len(parts) >= 3 and parts[0].lower() == "series"
@@ -752,12 +1130,9 @@ def host_is_supported(url: str) -> bool:
 
 def detect_provider(url: str) -> str | None:
     host = clean_host(urlparse(url).netloc)
-    if any(host_matches(host, site["domain"]) for site in TCB_SITES):
-        return "tcb"
-    if any(host_matches(host, site["domain"]) for site in WORDPRESS_MANGA_SITES):
-        return "wordpress_manga"
-    if any(host_matches(host, site["domain"]) for site in NEXT_SERIES_SITES):
-        return "next_series"
+    for group in SUPPORTED_SOURCE_GROUPS:
+        if any(site_matches(host, site) for site in group["sites"]):
+            return str(group["provider"])
     return None
 
 
@@ -769,6 +1144,12 @@ def host_matches(host: str, domain: str) -> bool:
     left = clean_host(host)
     right = clean_host(domain)
     return left == right or left.endswith(f".{right}")
+
+
+def site_matches(host: str, site: dict[str, object]) -> bool:
+    domains = [str(site["domain"])]
+    domains.extend(str(alias) for alias in site.get("aliases", []))
+    return any(host_matches(host, domain) for domain in domains)
 
 
 def looks_like_wordpress_chapter_path(path: str) -> bool:
@@ -810,6 +1191,27 @@ def derive_wordpress_series_url(url: str) -> str | None:
     return parsed._replace(path=path, query="", fragment="").geturl()
 
 
+def derive_today_book_series_url(url: str) -> str | None:
+    parsed = urlparse(normalize_url(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2 or parts[0].lower() != "book":
+        return None
+    path = f"/book/{parts[1]}/chapter-list"
+    return parsed._replace(path=path, query="", fragment="").geturl()
+
+
+def derive_serialized_comic_series_url(url: str) -> str | None:
+    parsed = urlparse(normalize_url(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0].lower() == "comic":
+        path = "/" + "/".join(parts[:2])
+        return parsed._replace(path=path, query="", fragment="").geturl()
+    if len(parts) >= 3 and parts[0].lower() == "series" and parts[1].lower() == "comic":
+        path = "/" + "/".join(parts[:3])
+        return parsed._replace(path=path, query="", fragment="").geturl()
+    return None
+
+
 def derive_next_series_url(url: str) -> str | None:
     parsed = urlparse(normalize_url(url))
     parts = [part for part in parsed.path.split("/") if part]
@@ -832,3 +1234,10 @@ def series_slug_tokens(url: str) -> set[str]:
     candidate = re.sub(r"(?:[-_])chapter[-_ ]*\d.*$", "", candidate, flags=re.IGNORECASE)
     candidate = re.sub(r"(?:[-_])ch[-_ ]*\d.*$", "", candidate, flags=re.IGNORECASE)
     return {token for token in re.split(r"[^a-z0-9]+", candidate.lower()) if token}
+
+
+def today_book_slug(url: str) -> str:
+    parts = [part for part in urlparse(normalize_url(url)).path.split("/") if part]
+    if len(parts) >= 2 and parts[0].lower() == "book":
+        return parts[1].lower()
+    return ""

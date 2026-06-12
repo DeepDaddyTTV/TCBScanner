@@ -66,7 +66,7 @@ Supported environment variables:
 
 ## Supported Sites
 
-The current release supports 20 domains. This first wave focuses on the easiest public HTML-compatible sources from the EverythingMoe manga and manhwa lists.
+The current release supports 24 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.
 
 | Site | Domain | Provider family |
 | --- | --- | --- |
@@ -90,6 +90,10 @@ The current release supports 20 domains. This first wave focuses on the easiest 
 | [Lilymanga](https://lilymanga.net/) | `lilymanga.net` | WordPress-style manga HTML |
 | [Rawkuma](https://rawkuma.net/) | `rawkuma.net` | WordPress-style manga HTML |
 | [KDT Scans](https://silentquill.net/) | `silentquill.net` | WordPress-style manga HTML |
+| [Galaxy Manga](https://galaxymanga.io/) | `galaxymanga.io` | WordPress-style manga HTML |
+| [Today Manga](https://todaymanga.com/) | `todaymanga.com` | Book chapter-list HTML |
+| [Temple Scan](https://templescan.net/) | `templescan.net` | Serialized comic HTML |
+| [Diva Scans](https://divascans.com/) | `divascans.org` | Serialized comic HTML |
 
 If a supported site changes its markup or introduces stricter bot protection, that site may need a provider refresh before scans succeed again.
 
@@ -105,6 +109,13 @@ Or a supported WordPress-style series URL such as:
 
 ```text
 https://kingofshojo.com/manga/under-the-oak-tree/
+```
+
+Or one of the newer provider shapes such as:
+
+```text
+https://todaymanga.com/book/take-a-peek/chapter-list
+https://templescan.net/comic/a-lifelong-yearning-for-you
 ```
 
 You can also paste a chapter URL; the app will try to resolve it back to the parent series page when that site exposes enough structure to do so.

@@ -1273,31 +1273,11 @@ function initTheme() {
 
 function toggleOptionsPanel(forceOpen) {
   const panel = $("#settingsDrawer");
-  const toggle = $("#optionsToggle");
-  if (!panel || !toggle) return;
-
-  const shouldOpen =
-    typeof forceOpen === "boolean"
-      ? forceOpen
-      : panel.classList.contains("hidden") || panel.classList.contains("is-closing");
-
-  if (shouldOpen) {
-    panel.classList.remove("hidden", "is-closing");
-    panel.inert = false;
-    panel.setAttribute("aria-hidden", "false");
-    toggle.setAttribute("aria-expanded", "true");
-    void panel.offsetWidth;
-    panel.classList.add("is-opening");
-    return;
-  }
-
-  if (panel.classList.contains("hidden")) return;
-  panel.classList.remove("is-opening");
-  panel.inert = true;
-  panel.setAttribute("aria-hidden", "true");
-  toggle.setAttribute("aria-expanded", "false");
-  void panel.offsetWidth;
-  panel.classList.add("is-closing");
+  if (!panel) return;
+  const isOpen = typeof forceOpen === "boolean" ? forceOpen : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !isOpen);
+  panel.setAttribute("aria-hidden", String(!isOpen));
+  $("#optionsToggle").setAttribute("aria-expanded", String(isOpen));
 }
 
 function isChapterSelectable(chapter) {
@@ -1782,20 +1762,6 @@ document.addEventListener("click", (event) => {
 $("#refreshAll").addEventListener("click", () => {
   void refreshAll();
 });
-
-const settingsDrawer = $("#settingsDrawer");
-if (settingsDrawer) {
-  settingsDrawer.inert = settingsDrawer.classList.contains("hidden");
-  settingsDrawer.addEventListener("animationend", (event) => {
-    if (event.target !== settingsDrawer) return;
-    if (settingsDrawer.classList.contains("is-closing")) {
-      settingsDrawer.classList.remove("is-closing");
-      settingsDrawer.classList.add("hidden");
-      return;
-    }
-    settingsDrawer.classList.remove("is-opening");
-  });
-}
 
 $("#optionsToggle").addEventListener("click", toggleOptionsPanel);
 $("#settingsDrawerClose").addEventListener("click", () => {
