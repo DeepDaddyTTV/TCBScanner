@@ -51,6 +51,7 @@ WORDPRESS_MANGA_SITES = (
     {"name": "Rawkuma", "domain": "rawkuma.net"},
     {"name": "KDT Scans", "domain": "silentquill.net"},
     {"name": "Galaxy Manga", "domain": "galaxymanga.io"},
+    {"name": "Manhuarm MTL", "domain": "manhuarmtl.com"},
 )
 
 TODAY_BOOK_SITES = (
@@ -69,6 +70,15 @@ SERIALIZED_COMIC_SITES = (
 
 NEXT_SERIES_SITES = (
     {"name": "Flame Comics", "domain": "flamecomics.xyz"},
+)
+
+WEBTOON_PORTAL_SITES = (
+    {"name": "ManhwaZ", "domain": "manhwaz.com"},
+    {"name": "ManhwaHub", "domain": "manhwahub.net"},
+)
+
+KURAMANGA_SITES = (
+    {"name": "KuraManga", "domain": "kuramanga.com"},
 )
 
 SUPPORTED_SOURCE_GROUPS = (
@@ -96,6 +106,16 @@ SUPPORTED_SOURCE_GROUPS = (
         "provider": "next_series",
         "family": "Next.js series HTML",
         "sites": NEXT_SERIES_SITES,
+    },
+    {
+        "provider": "webtoon_portal",
+        "family": "Webtoon portal HTML",
+        "sites": WEBTOON_PORTAL_SITES,
+    },
+    {
+        "provider": "kuramanga",
+        "family": "Flat series slug HTML",
+        "sites": KURAMANGA_SITES,
     },
 )
 
@@ -222,6 +242,10 @@ async def discover_chapters(
         return await discover_serialized_comic_chapters(source_url, request_delay=request_delay)
     if provider == "next_series":
         return await discover_next_series_chapters(source_url, request_delay=request_delay)
+    if provider == "webtoon_portal":
+        return await discover_webtoon_portal_chapters(source_url, request_delay=request_delay)
+    if provider == "kuramanga":
+        return await discover_kuramanga_chapters(source_url, request_delay=request_delay)
     raise ValueError("This site is not in the current supported source list.")
 
 
@@ -237,6 +261,10 @@ def parse_page_images(html: str, base_url: str) -> list[dict[str, object]]:
         return parse_serialized_comic_page_images(html, base_url)
     if provider == "next_series":
         return parse_next_series_page_images(html, base_url)
+    if provider == "webtoon_portal":
+        return parse_webtoon_portal_page_images(html, base_url)
+    if provider == "kuramanga":
+        return parse_kuramanga_page_images(html, base_url)
     raise ValueError("This chapter source is not supported.")
 
 
@@ -425,6 +453,76 @@ async def discover_serialized_comic_chapters(
     raise ValueError("No chapter links were found on that page.")
 
 
+async def discover_webtoon_portal_chapters(
+    source_url: str,
+    *,
+    request_delay: float = 0.0,
+) -> tuple[str, list[dict[str, object]]]:
+    html = await fetch_html(source_url)
+    page_url = source_url
+
+    if is_webtoon_portal_chapter_url(source_url):
+        series_url = derive_webtoon_portal_series_url(source_url)
+        if series_url and normalize_url(series_url) != normalize_url(source_url):
+            if request_delay > 0:
+                await asyncio.sleep(request_delay)
+            page_url = series_url
+            html = await fetch_html(series_url)
+
+    chapters = parse_webtoon_portal_chapter_links(html, page_url)
+    if chapters:
+        return page_url, chapters
+
+    if is_webtoon_portal_chapter_url(source_url):
+        title = parse_chapter_title(html, source_url)
+        chapter_key, sort_key = parse_chapter_key(title, source_url)
+        return source_url, [
+            {
+                "url": source_url,
+                "title": title,
+                "chapter_key": chapter_key,
+                "sort_key": sort_key,
+            }
+        ]
+
+    raise ValueError("No chapter links were found on that page.")
+
+
+async def discover_kuramanga_chapters(
+    source_url: str,
+    *,
+    request_delay: float = 0.0,
+) -> tuple[str, list[dict[str, object]]]:
+    html = await fetch_html(source_url)
+    page_url = source_url
+
+    if is_kuramanga_chapter_url(source_url):
+        series_url = derive_kuramanga_series_url(source_url)
+        if series_url and normalize_url(series_url) != normalize_url(source_url):
+            if request_delay > 0:
+                await asyncio.sleep(request_delay)
+            page_url = series_url
+            html = await fetch_html(series_url)
+
+    chapters = parse_kuramanga_chapter_links(html, page_url)
+    if chapters:
+        return page_url, chapters
+
+    if is_kuramanga_chapter_url(source_url):
+        title = parse_chapter_title(html, source_url)
+        chapter_key, sort_key = parse_chapter_key(title, source_url)
+        return source_url, [
+            {
+                "url": source_url,
+                "title": title,
+                "chapter_key": chapter_key,
+                "sort_key": sort_key,
+            }
+        ]
+
+    raise ValueError("No chapter links were found on that page.")
+
+
 def parse_tcb_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
     soup = BeautifulSoup(html, "lxml")
     found: dict[str, ChapterLink] = {}
@@ -529,6 +627,66 @@ def parse_serialized_comic_chapter_links(html: str, base_url: str) -> list[dict[
         if parsed.query or not is_serialized_comic_chapter_url(url):
             continue
         if derive_serialized_comic_series_url(url) != target_series:
+            continue
+
+        title = " ".join(anchor.get_text(" ", strip=True).split())
+        if not title or title.lower() in {"prev", "next", "previous"}:
+            title = title_from_url(url)
+        chapter_key, sort_key = parse_chapter_key(title, url)
+        found[url] = ChapterLink(url, title, chapter_key, sort_key)
+
+    return [
+        link.__dict__
+        for link in sorted(found.values(), key=lambda item: (item.sort_key, item.url))
+    ]
+
+
+def parse_webtoon_portal_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    target_series = derive_webtoon_portal_series_url(base_url) or normalize_url(base_url)
+    found: dict[str, ChapterLink] = {}
+    base_reference = f"{normalize_url(base_url).rstrip('/')}/"
+
+    for anchor in soup.find_all("a", href=True):
+        raw_href = str(anchor.get("href") or "").strip()
+        if not raw_href or raw_href.startswith("#") or "{" in raw_href:
+            continue
+
+        url = normalize_url(urljoin(base_reference, raw_href))
+        parsed = urlparse(url)
+        if parsed.query or not is_webtoon_portal_chapter_url(url):
+            continue
+        if derive_webtoon_portal_series_url(url) != target_series:
+            continue
+
+        title = " ".join(anchor.get_text(" ", strip=True).split())
+        if not title or title.lower() in {"prev", "next", "previous"}:
+            title = title_from_url(url)
+        chapter_key, sort_key = parse_chapter_key(title, url)
+        found[url] = ChapterLink(url, title, chapter_key, sort_key)
+
+    return [
+        link.__dict__
+        for link in sorted(found.values(), key=lambda item: (item.sort_key, item.url))
+    ]
+
+
+def parse_kuramanga_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    target_series = derive_kuramanga_series_url(base_url) or normalize_url(base_url)
+    found: dict[str, ChapterLink] = {}
+    base_reference = f"{normalize_url(base_url).rstrip('/')}/"
+
+    for anchor in soup.find_all("a", href=True):
+        raw_href = str(anchor.get("href") or "").strip()
+        if not raw_href or raw_href.startswith("#") or "{" in raw_href:
+            continue
+
+        url = normalize_url(urljoin(base_reference, raw_href))
+        parsed = urlparse(url)
+        if parsed.query or not is_kuramanga_chapter_url(url):
+            continue
+        if derive_kuramanga_series_url(url) != target_series:
             continue
 
         title = " ".join(anchor.get_text(" ", strip=True).split())
@@ -778,6 +936,68 @@ def parse_next_series_page_images(html: str, base_url: str) -> list[dict[str, ob
     return [page.__dict__ for page in pages]
 
 
+def parse_webtoon_portal_page_images(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    image_nodes = soup.select(".reading-content img, #chapter_content img, .page-break img")
+    images: list[PageImage] = []
+    seen: set[str] = set()
+
+    for image in image_nodes:
+        raw_url = first_present(
+            image.get("data-src"),
+            image.get("data-lazy-src"),
+            image.get("src"),
+            first_srcset_url(image.get("data-srcset")),
+            first_srcset_url(image.get("srcset")),
+        )
+        if not raw_url:
+            continue
+
+        url = normalize_url(urljoin(base_url, str(raw_url).strip()))
+        if url in seen or not looks_like_webtoon_portal_page_image(url):
+            continue
+
+        alt = " ".join(str(image.get("alt") or image.get("title") or "").split())
+        page_number = (
+            parse_page_number(alt)
+            or parse_page_number_from_url(url)
+            or len(images) + 1
+        )
+        images.append(PageImage(url, page_number, extension_from_url(url)))
+        seen.add(url)
+
+    if len(images) < 3:
+        for url in extract_embedded_image_urls(html, base_url):
+            if url in seen or not looks_like_webtoon_portal_page_image(url):
+                continue
+            page_number = parse_page_number_from_url(url) or len(images) + 1
+            images.append(PageImage(url, page_number, extension_from_url(url)))
+            seen.add(url)
+
+    images = prune_page_images_by_bucket(images)
+    return [
+        page.__dict__
+        for page in sorted(images, key=lambda item: (item.page_number, item.url))
+    ]
+
+
+def parse_kuramanga_page_images(html: str, base_url: str) -> list[dict[str, object]]:
+    images: list[PageImage] = []
+    seen: set[str] = set()
+
+    for url in extract_embedded_image_urls(html, base_url):
+        if url in seen or not looks_like_kuramanga_page_image(url):
+            continue
+        page_number = parse_page_number_from_url(url) or len(images) + 1
+        images.append(PageImage(url, page_number, extension_from_url(url)))
+        seen.add(url)
+
+    return [
+        page.__dict__
+        for page in sorted(images, key=lambda item: (item.page_number, item.url))
+    ]
+
+
 def parse_chapter_key(title: str, url: str) -> tuple[str, float]:
     candidates = [title, url.replace("-", " ").replace("/", " ")]
     for candidate in candidates:
@@ -892,6 +1112,32 @@ def looks_like_serialized_comic_page_image(url: str) -> bool:
     return re.search(r"/\d{1,4}\.(?:jpg|jpeg|png|webp|gif)$", lowered_path) is not None
 
 
+def looks_like_webtoon_portal_page_image(url: str) -> bool:
+    parsed = urlparse(url)
+    lowered_path = parsed.path.lower()
+    file_name = PurePosixPath(lowered_path).name
+
+    if not re.search(r"\.(?:jpg|jpeg|png|webp|gif)$", file_name):
+        return False
+    if any(token in lowered_path for token in ("logo", "favicon", "avatar", "banner", "cover", "thumb")):
+        return False
+    return True
+
+
+def looks_like_kuramanga_page_image(url: str) -> bool:
+    parsed = urlparse(url)
+    lowered_path = parsed.path.lower()
+    file_name = PurePosixPath(lowered_path).name
+
+    if "/chapters/" not in lowered_path:
+        return False
+    if not re.search(r"\.(?:jpg|jpeg|png|webp|gif)$", file_name):
+        return False
+    if any(token in lowered_path for token in ("cover", "thumbnail", "icon", "favicon", "logo")):
+        return False
+    return True
+
+
 def prune_page_images_by_bucket(images: list[PageImage]) -> list[PageImage]:
     if len(images) < 3:
         return images
@@ -952,6 +1198,10 @@ def parse_page_number_from_url(url: str) -> int | None:
     tagged = re.search(r"(?:page|pic|image|img)[-_ ]?(\d+)", stem, re.IGNORECASE)
     if tagged:
         return int(tagged.group(1))
+
+    leading = re.match(r"^(\d{1,4})(?:[-_]\d+)?$", stem)
+    if leading:
+        return int(leading.group(1))
 
     numeric = parse_numeric_filename(url)
     if numeric is not None:
@@ -1089,6 +1339,10 @@ def is_chapter_url(url: str) -> bool:
         return is_serialized_comic_chapter_url(url)
     if provider == "next_series":
         return is_next_series_chapter_url(url)
+    if provider == "webtoon_portal":
+        return is_webtoon_portal_chapter_url(url)
+    if provider == "kuramanga":
+        return is_kuramanga_chapter_url(url)
     return False
 
 
@@ -1122,6 +1376,20 @@ def is_serialized_comic_chapter_url(url: str) -> bool:
 def is_next_series_chapter_url(url: str) -> bool:
     parts = [part for part in urlparse(url).path.split("/") if part]
     return len(parts) >= 3 and parts[0].lower() == "series"
+
+
+def is_webtoon_portal_chapter_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    return (
+        len(parts) >= 3
+        and parts[0].lower() == "webtoon"
+        and parts[2].lower().startswith("chapter-")
+    )
+
+
+def is_kuramanga_chapter_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    return len(parts) >= 2 and parts[1].lower().startswith("chapter-")
 
 
 def host_is_supported(url: str) -> bool:
@@ -1218,6 +1486,24 @@ def derive_next_series_url(url: str) -> str | None:
     if len(parts) < 2 or parts[0].lower() != "series":
         return None
     path = "/" + "/".join(parts[:2])
+    return parsed._replace(path=path, query="", fragment="").geturl()
+
+
+def derive_webtoon_portal_series_url(url: str) -> str | None:
+    parsed = urlparse(normalize_url(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2 or parts[0].lower() != "webtoon":
+        return None
+    path = "/" + "/".join(parts[:2])
+    return parsed._replace(path=path, query="", fragment="").geturl()
+
+
+def derive_kuramanga_series_url(url: str) -> str | None:
+    parsed = urlparse(normalize_url(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    if not parts:
+        return None
+    path = "/" + parts[0]
     return parsed._replace(path=path, query="", fragment="").geturl()
 
 
