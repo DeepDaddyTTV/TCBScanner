@@ -91,6 +91,7 @@ const state = {
   },
   sidebarSearching: false,
   sidebarSearchMessage: "",
+  searchPreview: null,
   discoverDraft: defaultSeriesDraft(),
   editDraft: null,
   editDraftSeriesId: null,
@@ -426,6 +427,100 @@ function resetDiscoverDraft(overrides = {}) {
   state.discoverDraft = defaultSeriesDraft(overrides);
 }
 
+function readDraftValue(draft, key, fallback) {
+  if (draft && Object.prototype.hasOwnProperty.call(draft, key)) {
+    return draft[key];
+  }
+  return fallback;
+}
+
+function buildSeriesFromDraft(draft, fallback = {}) {
+  const intervalHours = Number(
+    readDraftValue(
+      draft,
+      "check_interval_hours",
+      String(Math.max(0.5, Number(fallback.check_interval_minutes || 30) / 60)),
+    ) || 0.5,
+  );
+
+  return {
+    ...fallback,
+    title: String(readDraftValue(draft, "title", fallback.title || "")),
+    source_url: String(readDraftValue(draft, "source_url", fallback.source_url || fallback.url || "")),
+    folder: String(readDraftValue(draft, "folder", fallback.folder || fallback.title || "")),
+    check_interval_minutes: Math.max(30, Math.round(intervalHours * 60)),
+    naming_format: String(readDraftValue(draft, "naming_format", fallback.naming_format || "")),
+    enabled: Boolean(readDraftValue(draft, "enabled", fallback.enabled)),
+    backfill_existing: Boolean(readDraftValue(draft, "backfill_existing", fallback.backfill_existing)),
+  };
+}
+
+function clearSearchPreview({ resetDraft = false } = {}) {
+  state.searchPreview = null;
+  if (resetDraft) {
+    resetDiscoverDraft();
+  }
+}
+
+function getPreviewSeries() {
+  if (!state.searchPreview) return null;
+  return buildSeriesFromDraft(state.discoverDraft, {
+    title: state.searchPreview.title || "",
+    source_url: state.searchPreview.url || "",
+    folder: state.searchPreview.title || "",
+    check_interval_minutes: 30,
+    naming_format: "",
+    enabled: true,
+    backfill_existing: false,
+    chapter_count: 0,
+    downloaded_count: 0,
+    pending_count: 0,
+    failed_count: 0,
+    last_checked_at: null,
+    preview: true,
+    site_name: state.searchPreview.site_name || "",
+    site_domain: state.searchPreview.site_domain || "",
+  });
+}
+
+function getFocusSeries() {
+  const preview = getPreviewSeries();
+  if (preview) return preview;
+
+  const selected = getSelectedSeries();
+  if (!selected) return null;
+
+  if (state.sidebarMode === "settings" && state.editDraft) {
+    return buildSeriesFromDraft(state.editDraft, selected);
+  }
+
+  return selected;
+}
+
+function selectSearchPreview(match) {
+  if (!match) return;
+  state.searchPreview = {
+    title: String(match.title || ""),
+    url: String(match.url || ""),
+    site_name: String(match.site_name || ""),
+    site_domain: String(match.site_domain || ""),
+  };
+  resetDiscoverDraft({
+    title: match.title || "",
+    source_url: match.url || "",
+    folder: match.title || "",
+    check_interval_hours: "0.5",
+    naming_format: "",
+    enabled: true,
+    backfill_existing: false,
+  });
+  state.focusTab = "settings";
+  setSidebarMode("discover");
+  setNotice(`Prepared ${match.title} from ${match.site_name}. Adjust the settings on the right, then track it.`, "success");
+  renderAll();
+  void queueArtworkHydration([{ title: match.title, source_url: match.url }]);
+}
+
 function getDisplayedSeries() {
   const query = normalizeSeriesKey(state.libraryFilter);
   if (!query) return state.series;
@@ -678,9 +773,11 @@ function renderOverview() {
 
 function renderSeries() {
   const list = $("#seriesList");
+  const queryActive = Boolean(state.sidebarSearchQuery.trim());
   const displayedSeries = getDisplayedSeries();
+  const sourceMatches = queryActive ? state.sidebarSearchResults.source_matches || [] : [];
 
-  if (!state.series.length) {
+  if (!state.series.length && !queryActive) {
     list.innerHTML = `
       <div class="empty-state">
         <strong>No tracked series yet</strong>
@@ -690,7 +787,7 @@ function renderSeries() {
     return;
   }
 
-  if (!displayedSeries.length) {
+  if (!queryActive && !displayedSeries.length) {
     list.innerHTML = `
       <div class="empty-state">
         <strong>No tracked series match this search</strong>
@@ -700,62 +797,50 @@ function renderSeries() {
     return;
   }
 
-  list.innerHTML = displayedSeries
-    .map((series) => {
-      const isSelected = series.id === state.selectedSeriesId;
-      const art = getArtworkForSeries(series);
-      const coverUrl = getSeriesCoverUrl(series, art);
-      const densityClass = getSeriesDensityClass(series.title);
-      return `
-        <article
-          class="series-card${isSelected ? " selected" : ""}${densityClass}"
-          data-series-id="${series.id}"
-          data-series-slug="${escapeHtml(normalizeSeriesKey(series.title).replaceAll(" ", "-"))}"
-          tabindex="0"
-          role="button"
-          aria-pressed="${isSelected ? "true" : "false"}"
-        >
-          <div class="series-cover${coverUrl ? "" : " fallback"}">
-            ${
-              coverUrl
-                ? `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`
-                : `<div class="series-mark">${escapeHtml(seriesMark(series.title))}</div>`
-            }
-          </div>
+  if (!queryActive) {
+    list.innerHTML = displayedSeries.map((series) => renderTrackedSeriesCard(series)).join("");
+    return;
+  }
 
-          <div class="series-body">
-            <div class="series-top">
-              <div class="series-copy">
-                <h3>${escapeHtml(series.title)}</h3>
-                <p>${escapeHtml(getHostLabel(series.source_url))}</p>
-              </div>
-              <span class="status-pill status-${series.enabled ? "enabled" : "paused"}">
-                ${series.enabled ? "Monitored" : "Paused"}
-              </span>
-            </div>
+  const sections = [];
+  if (displayedSeries.length) {
+    sections.push(
+      renderSeriesListSection(
+        "Tracked matches",
+        displayedSeries.map((series) => renderTrackedSeriesCard(series, { searchMode: true })).join(""),
+      ),
+    );
+  }
 
-            <div class="series-stats">
-              ${seriesInlineStat(series.chapter_count, "found")}
-              ${seriesInlineStat(series.downloaded_count, "downloaded")}
-              ${seriesInlineStat(series.pending_count, "queued")}
-              ${seriesInlineStat(series.failed_count, "failed")}
-            </div>
+  if (state.sidebarSearching) {
+    sections.push(`
+      <div class="series-search-state">
+        <strong>Searching supported sites…</strong>
+        <span>Checking indexed families for fresh matches.</span>
+      </div>
+    `);
+  }
 
-            <div class="series-meta">
-              <span>${escapeHtml(formatCadence(series.check_interval_minutes))}</span>
-              <span>${escapeHtml(formatRelativeTime(series.last_checked_at))}</span>
-            </div>
+  if (sourceMatches.length) {
+    sections.push(
+      renderSeriesListSection(
+        "Supported site results",
+        sourceMatches.map((match, index) => renderSearchSuggestionCard(match, index)).join(""),
+      ),
+    );
+  }
 
-            ${
-              series.last_error
-                ? `<p class="series-error">${escapeHtml(series.last_error)}</p>`
-                : ""
-            }
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+  if (!sections.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>No matches found for this search</strong>
+        <p>Nothing in your tracked library or the searchable supported-site families matched that query.</p>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = sections.join("");
 }
 
 function seriesInlineStat(value, label) {
@@ -767,11 +852,119 @@ function seriesInlineStat(value, label) {
   `;
 }
 
+function renderSeriesListSection(title, content) {
+  return `
+    <div class="series-list-group-label">${escapeHtml(title)}</div>
+    ${content}
+  `;
+}
+
+function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
+  const isSelected = !state.searchPreview && series.id === state.selectedSeriesId;
+  const art = getArtworkForSeries(series);
+  const coverUrl = getSeriesCoverUrl(series, art);
+  const densityClass = getSeriesDensityClass(series.title);
+  return `
+    <article
+      class="series-card${isSelected ? " selected" : ""}${densityClass}"
+      data-series-id="${series.id}"
+      data-series-slug="${escapeHtml(normalizeSeriesKey(series.title).replaceAll(" ", "-"))}"
+      ${searchMode ? 'data-search-context="query"' : ""}
+      tabindex="0"
+      role="button"
+      aria-pressed="${isSelected ? "true" : "false"}"
+    >
+      <div class="series-cover${coverUrl ? "" : " fallback"}">
+        ${
+          coverUrl
+            ? `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`
+            : `<div class="series-mark">${escapeHtml(seriesMark(series.title))}</div>`
+        }
+      </div>
+
+      <div class="series-body">
+        <div class="series-top">
+          <div class="series-copy">
+            <h3>${escapeHtml(series.title)}</h3>
+            <p>${escapeHtml(getHostLabel(series.source_url))}</p>
+          </div>
+          <span class="status-pill status-${series.enabled ? "enabled" : "paused"}">
+            ${series.enabled ? "Monitored" : "Paused"}
+          </span>
+        </div>
+
+        <div class="series-stats">
+          ${seriesInlineStat(series.chapter_count, "found")}
+          ${seriesInlineStat(series.downloaded_count, "downloaded")}
+          ${seriesInlineStat(series.pending_count, "queued")}
+          ${seriesInlineStat(series.failed_count, "failed")}
+        </div>
+
+        <div class="series-meta">
+          <span>${escapeHtml(formatCadence(series.check_interval_minutes))}</span>
+          <span>${escapeHtml(formatRelativeTime(series.last_checked_at))}</span>
+        </div>
+
+        ${
+          series.last_error
+            ? `<p class="series-error">${escapeHtml(series.last_error)}</p>`
+            : ""
+        }
+      </div>
+    </article>
+  `;
+}
+
+function renderSearchSuggestionCard(match, index) {
+  const art = getArtworkForSeries({ title: match.title, source_url: match.url });
+  const coverUrl = getSeriesCoverUrl({ title: match.title, source_url: match.url }, art);
+  const densityClass = getSeriesDensityClass(match.title);
+  const isSelected = state.searchPreview?.url === match.url;
+  const sourceLabel = [match.site_name, match.site_domain].filter(Boolean).join(" · ");
+  return `
+    <article
+      class="series-card search-preview${isSelected ? " selected" : ""}${densityClass}"
+      data-preview-index="${index}"
+      tabindex="0"
+      role="button"
+      aria-pressed="${isSelected ? "true" : "false"}"
+    >
+      <div class="series-cover${coverUrl ? "" : " fallback"}">
+        ${
+          coverUrl
+            ? `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`
+            : `<div class="series-mark">${escapeHtml(seriesMark(match.title))}</div>`
+        }
+      </div>
+
+      <div class="series-body">
+        <div class="series-top">
+          <div class="series-copy">
+            <h3>${escapeHtml(match.title)}</h3>
+            <p>${escapeHtml(sourceLabel || getHostLabel(match.url))}</p>
+          </div>
+          <span class="status-pill status-enabled">Preview</span>
+        </div>
+
+        <p class="series-suggestion-copy">Open this result in the center pane, then adjust its tracking settings on the right.</p>
+
+        <div class="series-meta">
+          <span>${escapeHtml(formatSourceDisplay(match.url))}</span>
+          <span>Select to tune settings</span>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
 function renderSeriesFocus() {
   const panel = $("#selectedSeriesPanel");
   const selected = getSelectedSeries();
+  const focusSeries = getFocusSeries();
+  const preview = getPreviewSeries();
+  const isPreview = Boolean(preview);
 
-  if (!selected) {
+  if (!focusSeries) {
     panel.innerHTML = `
       <div class="empty-state spacious">
         <strong>Choose a series to open the queue deck</strong>
@@ -781,24 +974,45 @@ function renderSeriesFocus() {
     return;
   }
 
-  const statusClass = selected.enabled ? "enabled" : "paused";
-  const statusText = selected.enabled ? "Monitored" : "Paused";
-  const art = getArtworkForSeries(selected);
+  const statusClass = focusSeries.enabled ? "enabled" : "paused";
+  const statusText = focusSeries.enabled ? "Monitored" : "Paused";
+  const artSeries = isPreview
+    ? { title: state.searchPreview?.title || focusSeries.title, source_url: focusSeries.source_url }
+    : selected || focusSeries;
+  const art = getArtworkForSeries(artSeries);
   const heroUrl = selectArtworkUrl(art, "hero") || selectArtworkUrl(art, "cover");
-  const seriesSlug = normalizeSeriesKey(selected.title).replaceAll(" ", "-");
-  const useMockupArt = seriesSlug === "one-piece";
+  const seriesSlug = normalizeSeriesKey(focusSeries.title).replaceAll(" ", "-");
+  const useMockupArt = !isPreview && seriesSlug === "one-piece";
   const focusArtUrl = useMockupArt ? "/static/mockup_assets/hero-art.png" : heroUrl;
-  const focusDensityClass = getFocusDensityClass(selected.title);
-  const focusEmblem = getFocusEmblem(selected, art, useMockupArt);
+  const focusDensityClass = getFocusDensityClass(focusSeries.title);
+  const focusEmblem = getFocusEmblem(focusSeries, art, useMockupArt);
   const artStyle = focusArtUrl
     ? ` style="--focus-art: url('${focusArtUrl.replaceAll("'", "%27")}')"`
     : "";
-  const namingPreview = getNamingPreview(selected);
-  const sourceDisplay = formatSourceDisplay(selected.source_url);
-  const folderDisplay = formatFolderDisplay(selected.folder || selected.title);
+  const namingPreview = getNamingPreview(focusSeries);
+  const sourceDisplay = formatSourceDisplay(focusSeries.source_url);
+  const folderDisplay = formatFolderDisplay(focusSeries.folder || focusSeries.title);
+  const focusIdentity = isPreview
+    ? 'data-preview="true"'
+    : `data-series-id="${selected.id}" data-series-slug="${escapeHtml(seriesSlug)}"`;
+  const tabMarkup = isPreview
+    ? `
+        <div class="focus-tabs" aria-label="Series workspace sections">
+          <span class="focus-tab active static">Settings</span>
+        </div>
+      `
+    : `
+        <div class="focus-tabs" aria-label="Series workspace sections">
+          <button class="focus-tab${state.focusTab === "chapters" ? " active" : ""}" type="button" data-tab="chapters">Chapters</button>
+          <button class="focus-tab${state.focusTab === "details" ? " active" : ""}" type="button" data-tab="details">Details</button>
+          <button class="focus-tab${state.focusTab === "history" ? " active" : ""}" type="button" data-tab="history">History</button>
+          <button class="focus-tab${state.focusTab === "files" ? " active" : ""}" type="button" data-tab="files">Files</button>
+          <button class="focus-tab${state.focusTab === "settings" ? " active" : ""}" type="button" data-tab="settings">Settings</button>
+        </div>
+      `;
 
   panel.innerHTML = `
-    <div class="focus-hero${useMockupArt ? " use-mockup-art" : ""}${focusDensityClass}" data-series-id="${selected.id}" data-series-slug="${escapeHtml(seriesSlug)}"${artStyle}>
+    <div class="focus-hero${useMockupArt ? " use-mockup-art" : ""}${focusDensityClass}${isPreview ? " preview-focus" : ""}" ${focusIdentity}${artStyle}>
       <div class="focus-watermark" aria-hidden="true"></div>
       <div class="focus-banner">
         <div class="focus-aside">
@@ -807,35 +1021,29 @@ function renderSeriesFocus() {
         </div>
         <div class="focus-copy">
           <div class="focus-heading">
-            <h2>${escapeHtml(selected.title)}</h2>
+            <h2>${escapeHtml(focusSeries.title)}</h2>
           </div>
           <p class="focus-detail focus-detail-source">
             <strong>Source:</strong>
-            <a class="focus-link" href="${escapeHtml(selected.source_url)}" target="_blank" rel="noreferrer">
+            <a class="focus-link" href="${escapeHtml(focusSeries.source_url)}" target="_blank" rel="noreferrer">
               ${escapeHtml(sourceDisplay)}
             </a>
           </p>
           <div class="focus-detail-grid">
-            <span><strong>Library:</strong><em>${escapeHtml(selected.title)}</em></span>
+            <span><strong>Library:</strong><em>${escapeHtml(focusSeries.title)}</em></span>
             <span><strong>Folder:</strong><em>${escapeHtml(folderDisplay)}</em></span>
-            <span><strong>Interval:</strong><em>${escapeHtml(formatInterval(selected.check_interval_minutes))}</em></span>
+            <span><strong>Interval:</strong><em>${escapeHtml(formatInterval(focusSeries.check_interval_minutes))}</em></span>
           </div>
           <p class="focus-detail focus-detail-naming"><strong>Naming:</strong><span>${escapeHtml(namingPreview)}</span></p>
-          <div class="focus-tabs" aria-label="Series workspace sections">
-            <button class="focus-tab${state.focusTab === "chapters" ? " active" : ""}" type="button" data-tab="chapters">Chapters</button>
-            <button class="focus-tab${state.focusTab === "details" ? " active" : ""}" type="button" data-tab="details">Details</button>
-            <button class="focus-tab${state.focusTab === "history" ? " active" : ""}" type="button" data-tab="history">History</button>
-            <button class="focus-tab${state.focusTab === "files" ? " active" : ""}" type="button" data-tab="files">Files</button>
-            <button class="focus-tab${state.focusTab === "settings" ? " active" : ""}" type="button" data-tab="settings">Settings</button>
-          </div>
+          ${tabMarkup}
         </div>
         <div class="focus-art" aria-hidden="true"></div>
       </div>
 
-      <div class="focus-actions sr-only" data-series-id="${selected.id}">
+      <div class="focus-actions sr-only" data-series-id="${selected?.id || ""}">
         <label class="monitor-toggle compact">
-          <input type="checkbox" data-action="monitor" ${selected.enabled ? "checked" : ""} />
-          <span>${selected.enabled ? "Monitor new chapters automatically" : "Series is currently paused"}</span>
+          <input type="checkbox" data-action="monitor" ${focusSeries.enabled ? "checked" : ""} />
+          <span>${focusSeries.enabled ? "Monitor new chapters automatically" : "Series is currently paused"}</span>
         </label>
 
         <div class="focus-action-row">
@@ -853,8 +1061,14 @@ function renderSidebar() {
   if (!panel) return;
 
   const selected = getSelectedSeries();
+  const preview = getPreviewSeries();
   if (state.sidebarMode === "settings") {
     ensureEditDraft();
+  }
+
+  if (preview) {
+    panel.innerHTML = renderDiscoverSidebar();
+    return;
   }
 
   if (state.sidebarMode === "discover") {
@@ -902,38 +1116,45 @@ function renderSidebar() {
 }
 
 function renderDiscoverSidebar() {
-  const results = state.sidebarSearchResults || { library_matches: [], source_matches: [] };
-  const hasQuery = Boolean(state.sidebarSearchQuery.trim());
-  const hasResults = results.library_matches.length || results.source_matches.length;
+  const preview = getPreviewSeries();
+  const helperCopy = preview
+    ? `
+        <div class="sidebar-block">
+          <div class="sidebar-series-summary">
+            <strong>${escapeHtml(preview.title || "Search result preview")}</strong>
+            <span>${escapeHtml(preview.site_name || getHostLabel(preview.source_url))}</span>
+          </div>
+          <div class="inline-alert">
+            <strong>Search result selected</strong>
+            <p>This preview came from the left rail. Adjust the tracking settings below, then add it to your library.</p>
+          </div>
+        </div>
+      `
+    : `
+        <div class="sidebar-block">
+          <div class="inline-alert">
+            <strong>Use the left rail to search</strong>
+            <p>Search results stay in the tracked-series column. Pick a result there to preview it in the middle pane, or paste a supported series URL below.</p>
+          </div>
+        </div>
+      `;
+
   return `
     <div class="panel-heading">
       <div>
         <h2>Add new series</h2>
-        <p>Search your library first, then supported sites. Picking a site suggestion fills the form, but you can still change every setting before tracking it.</p>
+        <p>Search the left rail first, then fine-tune the selected result here before tracking it.</p>
       </div>
     </div>
 
-    <div class="sidebar-block">
-      <form class="series-search-form" id="sidebarSearchForm">
-        <label class="field-span">
-          <span>Series search</span>
-          <div class="search-input-shell">
-            <span class="search-input-icon" aria-hidden="true">${icons.search}</span>
-            <input name="query" type="search" value="${escapeHtml(state.sidebarSearchQuery)}" placeholder="Search library or supported sites" autocomplete="off" />
-          </div>
-        </label>
-        <button class="primary-action field-span" type="submit">
-          ${icons.search}
-          <span>${state.sidebarSearching ? "Searching..." : "Search"}</span>
-        </button>
-      </form>
-      ${renderSearchResults(hasQuery, hasResults, results)}
-    </div>
+    ${helperCopy}
 
     ${renderSeriesForm({
       mode: "create",
       title: "Track series",
-      description: "Use a search suggestion or paste a supported series URL manually.",
+      description: preview
+        ? `This form is prefilled from ${preview.site_name || getHostLabel(preview.source_url)}.`
+        : "Paste a supported series URL manually, or choose a result from the left rail to prefill this form.",
       draft: state.discoverDraft,
       submitLabel: "Track series",
       submitIcon: icons.download,
@@ -1350,8 +1571,9 @@ function formatFolderDisplay(folder) {
 function renderFilters() {
   const filters = $("#chapterFilters");
   const selected = getSelectedSeries();
+  const preview = getPreviewSeries();
 
-  if (!selected) {
+  if (!selected || preview) {
     filters.innerHTML = "";
     return;
   }
@@ -1373,11 +1595,26 @@ function renderFilters() {
 
 function renderChapters() {
   const selected = getSelectedSeries();
+  const preview = getPreviewSeries();
   const list = $("#chapterList");
   const head = $("#chapterListHead");
   const visibleChapters = getVisibleChapters();
 
-  $("#chapterCount").textContent = buildChapterCountLabel(selected, visibleChapters.length);
+  $("#chapterCount").textContent = preview
+    ? "Track this preview to build its queue."
+    : buildChapterCountLabel(selected, visibleChapters.length);
+
+  if (preview) {
+    head.classList.add("hidden");
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>This title is still a search preview</strong>
+        <p>Select Track series on the right to add it to your library. Once tracked, the chapter queue will populate here.</p>
+      </div>
+    `;
+    renderSelectionTools();
+    return;
+  }
 
   if (!selected) {
     head.classList.add("hidden");
@@ -1564,20 +1801,21 @@ function renderSelectionTools() {
   const bulkMenu = $("#chapterBulkMenu");
   const dock = $("#selectionDock");
   const selected = getSelectedSeries();
+  const preview = getPreviewSeries();
   const visibleChapters = getVisibleChapters();
   const selectableCount = visibleChapters.filter(isChapterSelectable).length;
   const selectedCount = countSelectedVisibleChapters();
 
-  tools.classList.toggle("hidden", !selected);
+  tools.classList.toggle("hidden", !selected || preview);
   bulkToggle.disabled = !selectableCount && !selectedCount;
-  bulkToggle.setAttribute("aria-expanded", String(state.chapterBulkOpen));
-  bulkMenu.classList.toggle("hidden", !state.chapterBulkOpen || !selected);
+  bulkToggle.setAttribute("aria-expanded", String(!preview && state.chapterBulkOpen));
+  bulkMenu.classList.toggle("hidden", preview || !state.chapterBulkOpen || !selected);
   $("#selectVisibleChapters").disabled = !selectableCount;
   $("#clearSelectedChapters").disabled = !selectedCount;
   $("#queueSelectedChapters").disabled = !selectedCount;
   $("#selectedCount").textContent = `${selectedCount} selected`;
 
-  dock.classList.toggle("hidden", !selectedCount);
+  dock.classList.toggle("hidden", preview || !selectedCount);
   $("#selectionDockCount").textContent = `${selectedCount} selected`;
   $("#clearSelectedChaptersDock").disabled = !selectedCount;
   $("#queueSelectedChaptersDock").disabled = !selectedCount;
@@ -2170,22 +2408,12 @@ function syncDraftFromPayload(payload, mode) {
 }
 
 function applySearchSuggestion(match) {
-  resetDiscoverDraft({
-    title: match.title || "",
-    source_url: match.url || "",
-    folder: match.title || "",
-    check_interval_hours: "0.5",
-    naming_format: "",
-    enabled: true,
-    backfill_existing: false,
-  });
-  setSidebarMode("discover");
-  setNotice(`Prepared ${match.title} from ${match.site_name}. You can still change the settings before tracking it.`, "success");
-  renderSidebar();
+  selectSearchPreview(match);
 }
 
 async function selectSeries(seriesId, tab = "chapters") {
   if (!seriesId) return;
+  clearSearchPreview();
   if (state.selectedSeriesId !== seriesId) {
     state.selectedSeriesId = seriesId;
     state.chapterFilter = "all";
@@ -2203,6 +2431,7 @@ async function runSidebarSearch(query) {
     .join(" ");
   state.libraryFilter = cleaned;
   state.sidebarSearchQuery = cleaned;
+  clearSearchPreview({ resetDraft: true });
   if (!cleaned) {
     state.sidebarSearchResults = { query: "", library_matches: [], source_matches: [] };
     state.sidebarSearching = false;
@@ -2212,6 +2441,7 @@ async function runSidebarSearch(query) {
   }
 
   state.sidebarSearching = true;
+  state.sidebarSearchResults = { query: cleaned, library_matches: [], source_matches: [] };
   setSidebarMode("discover");
   setSearchMeta(`Searching "${cleaned}" in your library and supported sites…`);
   renderAll();
@@ -2227,6 +2457,14 @@ async function runSidebarSearch(query) {
       setSearchMeta(`No tracked matches for "${cleaned}". Showing ${remoteCount} supported-site suggestion${remoteCount === 1 ? "" : "s"}.`);
     } else {
       setSearchMeta(`No matches found for "${cleaned}".`);
+    }
+    if (remoteCount) {
+      void queueArtworkHydration(
+        result.source_matches.map((match) => ({
+          title: match.title,
+          source_url: match.url,
+        })),
+      );
     }
   } catch (error) {
     setSearchMeta(`Search failed for "${cleaned}".`);
@@ -2308,18 +2546,28 @@ listen($("#importLibraryFile"), "change", async (event) => {
 });
 
 listen($("#seriesList"), "click", async (event) => {
+  const previewCard = event.target.closest("[data-preview-index]");
+  if (previewCard) {
+    const match = state.sidebarSearchResults.source_matches?.[Number(previewCard.dataset.previewIndex)];
+    if (match) {
+      selectSearchPreview(match);
+    }
+    return;
+  }
+
   const card = event.target.closest("[data-series-id]");
   if (!card) return;
   const seriesId = Number(card.dataset.seriesId);
   if (!seriesId) return;
-  await selectSeries(seriesId, state.focusTab);
-  if (state.focusTab === "history") {
+  const nextTab = state.sidebarSearchQuery.trim() ? "settings" : state.focusTab;
+  await selectSeries(seriesId, nextTab);
+  if (nextTab === "history") {
     await loadSeriesHistory(true);
   }
 });
 
 $("#seriesList").addEventListener("keydown", (event) => {
-  const card = event.target.closest("[data-series-id]");
+  const card = event.target.closest("[data-series-id], [data-preview-index]");
   if (!card || (event.key !== "Enter" && event.key !== " ")) return;
   event.preventDefault();
   card.click();
@@ -2445,17 +2693,23 @@ listen($("#librarySearchForm"), "submit", async (event) => {
 });
 
 $("#librarySearchClear").addEventListener("click", () => {
+  const hadPreview = Boolean(state.searchPreview);
   state.libraryFilter = "";
   state.sidebarSearchQuery = "";
   state.sidebarSearchResults = { query: "", library_matches: [], source_matches: [] };
+  clearSearchPreview({ resetDraft: hadPreview });
+  if (hadPreview && state.selectedSeriesId) {
+    setSidebarMode(state.focusTab);
+  }
   setSearchMeta();
   renderAll();
 });
 
 $("#openAddSeriesButton").addEventListener("click", () => {
   setSidebarMode("discover");
-  renderSidebar();
-  const searchInput = $("#sidebarPanel input[name='query']");
+  clearSearchPreview({ resetDraft: true });
+  renderAll();
+  const searchInput = $("#librarySearchInput");
   if (searchInput) {
     searchInput.focus();
     searchInput.select();
@@ -2501,6 +2755,7 @@ listen($("#sidebarPanel"), "submit", async (event) => {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  clearSearchPreview({ resetDraft: true });
   resetDiscoverDraft();
   state.sidebarSearchQuery = "";
   state.sidebarSearchResults = { query: "", library_matches: [], source_matches: [] };
@@ -2526,6 +2781,7 @@ listen($("#sidebarPanel"), "input", async (event) => {
   if (!form) return;
   const mode = form.dataset.mode || "create";
   syncDraftFromPayload(normalizeSeriesPayload(readSeriesFormPayload(form)), mode);
+  renderSeriesFocus();
 });
 
 listen($("#sidebarPanel"), "change", async (event) => {
@@ -2533,6 +2789,7 @@ listen($("#sidebarPanel"), "change", async (event) => {
   if (form) {
     const mode = form.dataset.mode || "create";
     syncDraftFromPayload(normalizeSeriesPayload(readSeriesFormPayload(form)), mode);
+    renderSeriesFocus();
   }
 
   const monitor = event.target.closest("input[data-sidebar-monitor='true']");
@@ -2557,7 +2814,7 @@ listen($("#sidebarPanel"), "click", async (event) => {
 
   const sourceSuggestion = event.target.closest("[data-sidebar-source-url]");
   if (sourceSuggestion) {
-    applySearchSuggestion({
+    selectSearchPreview({
       title: sourceSuggestion.dataset.sidebarSourceTitle,
       url: sourceSuggestion.dataset.sidebarSourceUrl,
       site_name: sourceSuggestion.dataset.sidebarSourceSite,

@@ -5107,9 +5107,9 @@ select,
 
 .rail-search {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
-  margin-top: 12px;
+  grid-template-columns: minmax(0, 1fr) 88px 38px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .rail-search-field {
@@ -5117,10 +5117,12 @@ select,
 }
 
 .rail-search-field input {
-  min-height: 44px;
+  min-height: 40px;
+  padding: 0 10px;
   background: rgba(255, 255, 255, 0.08);
   border-color: var(--rail-line);
   color: #f7f0e6;
+  font-size: 0.84rem;
 }
 
 .rail-search-field input::placeholder {
@@ -5129,18 +5131,20 @@ select,
 
 .rail-search .small-action,
 .rail-search .icon-button {
-  min-height: 44px;
+  min-height: 40px;
 }
 
 .rail-search .small-action {
-  padding-inline: 12px;
+  padding-inline: 10px;
   color: #f7f0e6;
   background: rgba(255, 255, 255, 0.08);
   border-color: var(--rail-line);
+  font-size: 0.92rem;
+  letter-spacing: 0.03em;
 }
 
 .rail-search .icon-button {
-  width: 44px;
+  width: 38px;
   color: #f7f0e6;
   background: rgba(255, 255, 255, 0.08);
   border-color: var(--rail-line);
@@ -5152,6 +5156,39 @@ select,
   color: rgba(247, 240, 230, 0.72);
   font-size: 0.78rem;
   line-height: 1.35;
+}
+
+.series-list-group-label,
+.series-search-state {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(247, 240, 230, 0.72);
+  font-family: "Barlow Condensed", "IBM Plex Sans", sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.series-list-group-label + .series-card {
+  border-top: 0;
+}
+
+.series-search-state {
+  display: grid;
+  gap: 3px;
+}
+
+.series-search-state strong {
+  color: #f7f0e6;
+  font-size: 0.92rem;
+}
+
+.series-search-state span {
+  color: rgba(247, 240, 230, 0.66);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .sidebar-panel {
@@ -5365,6 +5402,65 @@ select,
   display: grid;
 }
 
+.series-card.search-preview .series-copy p {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.series-suggestion-copy {
+  color: rgba(247, 240, 230, 0.82);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.focus-tab.static {
+  cursor: default;
+}
+
+.focus-hero.preview-focus .focus-heading h2,
+.focus-hero.focus-condensed .focus-heading h2 {
+  white-space: normal;
+  text-wrap: balance;
+  line-height: 0.9;
+}
+
+.focus-hero.preview-focus .focus-banner,
+.focus-hero.focus-condensed .focus-banner {
+  grid-template-columns: 126px minmax(0, 1fr) 168px;
+}
+
+.focus-hero.preview-focus .focus-detail-grid,
+.focus-hero.focus-condensed .focus-detail-grid {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.focus-hero.preview-focus .focus-detail-grid span,
+.focus-hero.focus-condensed .focus-detail-grid span {
+  flex-basis: 100%;
+  white-space: normal;
+}
+
+.focus-hero.preview-focus .focus-detail-grid span::after,
+.focus-hero.focus-condensed .focus-detail-grid span::after {
+  display: none;
+}
+
+.focus-hero.preview-focus .focus-detail-grid em,
+.focus-hero.focus-condensed .focus-detail-grid em,
+.focus-hero.preview-focus .focus-detail-naming span,
+.focus-hero.focus-condensed .focus-detail-naming span {
+  overflow-wrap: anywhere;
+}
+
+.focus-hero.preview-focus .focus-detail-naming span,
+.focus-hero.focus-condensed .focus-detail-naming span {
+  display: block;
+  margin-top: 6px;
+  margin-left: 0;
+}
+
 :root[data-theme="dark"] .rail-search-field input,
 :root[data-theme="dark"] .rail-search .small-action,
 :root[data-theme="dark"] .rail-search .icon-button {
@@ -5375,6 +5471,7 @@ select,
 
 :root[data-theme="dark"] .rail-search-field input::placeholder,
 :root[data-theme="dark"] .rail-search-meta,
+:root[data-theme="dark"] .series-list-group-label,
 :root[data-theme="dark"] .sidebar-result-heading span,
 :root[data-theme="dark"] .sidebar-result-empty,
 :root[data-theme="dark"] .sidebar-result-button span,
@@ -5383,6 +5480,15 @@ select,
 :root[data-theme="dark"] .sidebar-history-row time,
 :root[data-theme="dark"] .sidebar-file-row span,
 :root[data-theme="dark"] .sidebar-detail-row span:first-child {
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] .series-search-state strong {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .series-search-state span,
+:root[data-theme="dark"] .series-suggestion-copy {
   color: var(--muted);
 }
 
