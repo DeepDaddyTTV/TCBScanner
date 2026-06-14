@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from pathlib import PurePosixPath
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -155,6 +155,17 @@ class PageImage:
     extension_hint: str
 
 
+@dataclass(frozen=True)
+class SourceSearchCandidate:
+    title: str
+    url: str
+    score: int
+    site_name: str
+    site_domain: str
+    provider: str
+    family: str
+
+
 async def fetch_html(url: str) -> str:
     try:
         async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
@@ -224,6 +235,81 @@ def list_supported_sources() -> list[dict[str, object]]:
 
 def supported_source_count() -> int:
     return sum(len(group["sites"]) for group in SUPPORTED_SOURCE_GROUPS)
+
+
+async def search_supported_series(query: str, limit: int = 12) -> list[dict[str, object]]:
+    cleaned = " ".join(str(query or "").strip().split())
+    if len(cleaned) < 2:
+        return []
+
+    searchable_providers = {"wordpress_manga", "webtoon_portal", "kuramanga"}
+    semaphore = asyncio.Semaphore(6)
+
+    async def run_site_search(group: dict[str, object], site: dict[str, object]) -> list[SourceSearchCandidate]:
+        async with semaphore:
+            try:
+                return await search_supported_site(
+                    cleaned,
+                    provider=str(group["provider"]),
+                    family=str(group["family"]),
+                    site=site,
+                )
+            except Exception:
+                return []
+
+    tasks = [
+        run_site_search(group, site)
+        for group in SUPPORTED_SOURCE_GROUPS
+        if str(group["provider"]) in searchable_providers
+        for site in group["sites"]
+    ]
+    results = await asyncio.gather(*tasks) if tasks else []
+
+    deduped: dict[str, SourceSearchCandidate] = {}
+    for batch in results:
+        for candidate in batch:
+            existing = deduped.get(candidate.url)
+            if existing is None or candidate.score > existing.score:
+                deduped[candidate.url] = candidate
+
+    ranked = sorted(
+        deduped.values(),
+        key=lambda item: (-item.score, item.title.lower(), item.site_name.lower(), item.url),
+    )
+    return [
+        {
+            "title": item.title,
+            "url": item.url,
+            "site_name": item.site_name,
+            "site_domain": item.site_domain,
+            "provider": item.provider,
+            "family": item.family,
+        }
+        for item in ranked[: max(1, limit)]
+    ]
+
+
+async def search_supported_site(
+    query: str,
+    *,
+    provider: str,
+    family: str,
+    site: dict[str, object],
+) -> list[SourceSearchCandidate]:
+    base_url = site_home_url(site)
+    if provider == "wordpress_manga":
+        search_url = f"{base_url}?s={quote_plus(query)}&post_type=wp-manga"
+        html = await fetch_html(search_url)
+        return parse_wordpress_search_candidates(html, search_url, site, query, provider, family)
+    if provider == "webtoon_portal":
+        search_url = f"{base_url}?s={quote_plus(query)}"
+        html = await fetch_html(search_url)
+        return parse_webtoon_portal_search_candidates(html, search_url, site, query, provider, family)
+    if provider == "kuramanga":
+        search_url = f"{base_url}?s={quote_plus(query)}"
+        html = await fetch_html(search_url)
+        return parse_kuramanga_search_candidates(html, search_url, site, query, provider, family)
+    return []
 
 
 async def discover_chapters(
@@ -699,6 +785,114 @@ def parse_kuramanga_chapter_links(html: str, base_url: str) -> list[dict[str, ob
         link.__dict__
         for link in sorted(found.values(), key=lambda item: (item.sort_key, item.url))
     ]
+
+
+def parse_wordpress_search_candidates(
+    html: str,
+    base_url: str,
+    site: dict[str, object],
+    query: str,
+    provider: str,
+    family: str,
+) -> list[SourceSearchCandidate]:
+    soup = BeautifulSoup(html, "lxml")
+    base_host = clean_host(urlparse(base_url).netloc or str(site["domain"]))
+    found: dict[str, SourceSearchCandidate] = {}
+
+    for anchor in soup.find_all("a", href=True):
+        raw_href = str(anchor.get("href") or "").strip()
+        if not raw_href or raw_href.startswith("#") or "{" in raw_href:
+            continue
+
+        url = normalize_url(urljoin(base_url, raw_href))
+        parsed = urlparse(url)
+        if not host_matches(base_host, parsed.netloc) or parsed.query:
+            continue
+        if not looks_like_wordpress_series_path(parsed.path):
+            continue
+
+        title = extract_search_result_title(anchor, url)
+        score = search_candidate_score(query, title, url)
+        if score < 24:
+            continue
+        candidate = build_source_search_candidate(site, title, url, score, provider, family)
+        existing = found.get(url)
+        if existing is None or candidate.score > existing.score:
+            found[url] = candidate
+
+    return list(found.values())
+
+
+def parse_webtoon_portal_search_candidates(
+    html: str,
+    base_url: str,
+    site: dict[str, object],
+    query: str,
+    provider: str,
+    family: str,
+) -> list[SourceSearchCandidate]:
+    soup = BeautifulSoup(html, "lxml")
+    base_host = clean_host(urlparse(base_url).netloc or str(site["domain"]))
+    found: dict[str, SourceSearchCandidate] = {}
+
+    for anchor in soup.find_all("a", href=True):
+        raw_href = str(anchor.get("href") or "").strip()
+        if not raw_href or raw_href.startswith("#") or "{" in raw_href:
+            continue
+
+        url = normalize_url(urljoin(base_url, raw_href))
+        parsed = urlparse(url)
+        if not host_matches(base_host, parsed.netloc) or parsed.query:
+            continue
+        if not is_webtoon_portal_series_url(url):
+            continue
+
+        title = extract_search_result_title(anchor, url)
+        score = search_candidate_score(query, title, url)
+        if score < 18:
+            continue
+        candidate = build_source_search_candidate(site, title, url, score, provider, family)
+        existing = found.get(url)
+        if existing is None or candidate.score > existing.score:
+            found[url] = candidate
+
+    return list(found.values())
+
+
+def parse_kuramanga_search_candidates(
+    html: str,
+    base_url: str,
+    site: dict[str, object],
+    query: str,
+    provider: str,
+    family: str,
+) -> list[SourceSearchCandidate]:
+    soup = BeautifulSoup(html, "lxml")
+    base_host = clean_host(urlparse(base_url).netloc or str(site["domain"]))
+    found: dict[str, SourceSearchCandidate] = {}
+
+    for anchor in soup.find_all("a", href=True):
+        raw_href = str(anchor.get("href") or "").strip()
+        if not raw_href or raw_href.startswith("#") or "{" in raw_href:
+            continue
+
+        url = normalize_url(urljoin(base_url, raw_href))
+        parsed = urlparse(url)
+        if not host_matches(base_host, parsed.netloc):
+            continue
+        if not is_kuramanga_series_url(url):
+            continue
+
+        title = extract_search_result_title(anchor, url)
+        score = search_candidate_score(query, title, url)
+        if score < 16:
+            continue
+        candidate = build_source_search_candidate(site, title, url, score, provider, family)
+        existing = found.get(url)
+        if existing is None or candidate.score > existing.score:
+            found[url] = candidate
+
+    return list(found.values())
 
 
 def find_tcb_all_chapters_url(html: str, base_url: str) -> str | None:
@@ -1392,6 +1586,18 @@ def is_kuramanga_chapter_url(url: str) -> bool:
     return len(parts) >= 2 and parts[1].lower().startswith("chapter-")
 
 
+def is_webtoon_portal_series_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    return len(parts) == 2 and parts[0].lower() == "webtoon"
+
+
+def is_kuramanga_series_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    if len(parts) != 1:
+        return False
+    return parts[0].lower() not in {"search", "settings", "contact", "dmca", "privacy-policy"}
+
+
 def host_is_supported(url: str) -> bool:
     return detect_provider(url) is not None
 
@@ -1505,6 +1711,87 @@ def derive_kuramanga_series_url(url: str) -> str | None:
         return None
     path = "/" + parts[0]
     return parsed._replace(path=path, query="", fragment="").geturl()
+
+
+def site_home_url(site: dict[str, object]) -> str:
+    return str(site.get("url") or f"https://{site['domain']}/").rstrip("/") + "/"
+
+
+def build_source_search_candidate(
+    site: dict[str, object],
+    title: str,
+    url: str,
+    score: int,
+    provider: str,
+    family: str,
+) -> SourceSearchCandidate:
+    return SourceSearchCandidate(
+        title=title,
+        url=normalize_url(url),
+        score=score,
+        site_name=str(site["name"]),
+        site_domain=str(site["domain"]),
+        provider=provider,
+        family=family,
+    )
+
+
+def extract_search_result_title(anchor: BeautifulSoup, url: str) -> str:
+    texts = [
+        anchor.get_text(" ", strip=True),
+        anchor.get("title"),
+        anchor.get("aria-label"),
+    ]
+    image = anchor.find("img")
+    if image is not None:
+        texts.extend([image.get("alt"), image.get("title")])
+
+    for value in texts:
+        cleaned = clean_search_title(str(value or ""))
+        if cleaned:
+            return cleaned
+    return title_from_url(url)
+
+
+def clean_search_title(value: str) -> str:
+    cleaned = " ".join(str(value or "").strip().split())
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"^read\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+(?:manga|manhwa|manhua|webtoon)\s+online.*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+\|\s+.*$", "", cleaned)
+    cleaned = re.sub(r"\s+-\s+.*$", "", cleaned)
+    cleaned = cleaned.strip(" -|")
+    return cleaned
+
+
+def search_candidate_score(query: str, title: str, url: str) -> int:
+    target = normalize_search_phrase(query)
+    title_phrase = normalize_search_phrase(title)
+    url_phrase = normalize_search_phrase(title_from_url(url))
+    all_tokens = set(search_tokens(f"{title_phrase} {url_phrase}"))
+    query_tokens = search_tokens(target)
+    overlap = sum(1 for token in query_tokens if token in all_tokens)
+
+    score = 0
+    if title_phrase == target or url_phrase == target:
+        score += 220
+    if title_phrase.startswith(target) or url_phrase.startswith(target):
+        score += 120
+    if target in title_phrase or target in url_phrase:
+        score += 80
+    score += overlap * 26
+    if overlap == 0 and target not in title_phrase and target not in url_phrase:
+        return 0
+    return max(score, 0)
+
+
+def normalize_search_phrase(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def search_tokens(value: str) -> list[str]:
+    return [token for token in re.split(r"[^a-z0-9]+", normalize_search_phrase(value)) if token]
 
 
 def series_slug_tokens(url: str) -> set[str]:

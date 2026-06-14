@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -125,6 +126,34 @@ class Store:
         self.add_event(series_id, None, "info", "Series added.")
         return self.get_series(series_id) or {}
 
+    def update_series(self, series_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                UPDATE series
+                SET title = ?,
+                    source_url = ?,
+                    folder = ?,
+                    check_interval_minutes = ?,
+                    enabled = ?,
+                    backfill_existing = ?,
+                    naming_format = ?
+                WHERE id = ?
+                """,
+                (
+                    payload["title"],
+                    payload["source_url"],
+                    payload["folder"],
+                    int(payload["check_interval_minutes"]),
+                    1 if payload.get("enabled", True) else 0,
+                    1 if payload.get("backfill_existing", False) else 0,
+                    payload.get("naming_format") or None,
+                    series_id,
+                ),
+            )
+        self.add_event(series_id, None, "info", "Series settings updated.")
+        return self.get_series(series_id)
+
     def list_series(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
@@ -163,6 +192,38 @@ class Store:
                 (series_id,),
             ).fetchone()
         return self._row_to_dict(row) if row else None
+
+    def search_series(self, query: str, limit: int = 12) -> list[dict[str, Any]]:
+        cleaned = " ".join(str(query or "").strip().split())
+        if len(cleaned) < 2:
+            return []
+
+        like = f"%{cleaned.lower()}%"
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    s.*,
+                    COUNT(c.id) AS chapter_count,
+                    SUM(CASE WHEN c.status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count,
+                    SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+                    SUM(CASE WHEN c.status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+                    SUM(CASE WHEN c.status = 'skipped' THEN 1 ELSE 0 END) AS skipped_count
+                FROM series s
+                LEFT JOIN chapters c ON c.series_id = s.id
+                WHERE lower(s.title) LIKE ? OR lower(s.source_url) LIKE ?
+                GROUP BY s.id
+                ORDER BY s.created_at DESC
+                LIMIT ?
+                """,
+                (like, like, max(1, limit * 4)),
+            ).fetchall()
+
+        ranked = sorted(
+            (self._row_to_dict(row) for row in rows),
+            key=lambda item: (-series_search_score(cleaned, item), str(item.get("title") or "")),
+        )
+        return ranked[: max(1, limit)]
 
     def update_series_source(self, series_id: int, source_url: str) -> None:
         with self._lock, self._conn:
@@ -556,19 +617,25 @@ class Store:
             "settings": len(snapshot["settings"]),
         }
 
-    def list_events(self, limit: int = 100) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self._conn.execute(
-                """
+    def list_events(self, limit: int = 100, series_id: int | None = None) -> list[dict[str, Any]]:
+        query = """
                 SELECT e.*, s.title AS series_title, c.display_title AS chapter_title
                 FROM events e
                 LEFT JOIN series s ON s.id = e.series_id
                 LEFT JOIN chapters c ON c.id = e.chapter_id
+            """
+        params: tuple[Any, ...]
+        if series_id is not None:
+            query += " WHERE e.series_id = ?"
+            params = (series_id, limit)
+        else:
+            params = (limit,)
+        query += """
                 ORDER BY e.id DESC
                 LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            """
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
     def _normalize_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -828,3 +895,35 @@ class Store:
             if key in data and data[key] is None:
                 data[key] = 0
         return data
+
+
+def series_search_score(query: str, series: dict[str, Any]) -> int:
+    title = normalize_search_text(series.get("title"))
+    source_url = normalize_search_text(series.get("source_url"))
+    target = normalize_search_text(query)
+    if not title and not source_url:
+        return 0
+
+    score = 0
+    if title == target:
+        score += 220
+    if title.startswith(target):
+        score += 120
+    if target in title:
+        score += 90
+    if target in source_url:
+        score += 28
+
+    title_tokens = set(tokenize_search(title))
+    source_tokens = set(tokenize_search(source_url))
+    overlap = sum(1 for token in tokenize_search(target) if token in title_tokens or token in source_tokens)
+    score += overlap * 24
+    return score
+
+
+def normalize_search_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def tokenize_search(value: Any) -> list[str]:
+    return [token for token in re.split(r"[^a-z0-9]+", normalize_search_text(value)) if token]

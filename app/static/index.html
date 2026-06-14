@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/png" href="/static/branding/tcb-scanner-favicon.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260611k" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260614b" />
   </head>
   <body>
     <main class="app-shell">
@@ -39,6 +39,36 @@
               <div class="brand-illustration" id="brandIllustration" aria-hidden="true"></div>
             </section>
 
+            <section class="panel series-panel" aria-label="Tracked series">
+              <div class="panel-heading">
+                <div>
+                  <h2>Tracked series</h2>
+                  <p>Select a title to inspect its queue.</p>
+                </div>
+                <button class="icon-button" id="openAddSeriesButton" type="button" aria-label="Add a new series">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+                </button>
+              </div>
+              <form class="rail-search" id="librarySearchForm">
+                <label class="rail-search-field" for="librarySearchInput">
+                  <span class="visually-hidden">Search library or supported sites</span>
+                  <input
+                    id="librarySearchInput"
+                    name="query"
+                    type="search"
+                    placeholder="Search library or supported sites"
+                    autocomplete="off"
+                  />
+                </label>
+                <button class="small-action" type="submit">Search</button>
+                <button class="icon-button" id="librarySearchClear" type="button" aria-label="Clear search">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+                </button>
+              </form>
+              <p class="rail-search-meta" id="librarySearchMeta">Search your tracked library first, then supported sources.</p>
+              <div class="series-list" id="seriesList"></div>
+            </section>
+
             <section class="panel overview-panel" aria-label="Library overview">
               <div class="panel-heading">
                 <div>
@@ -49,19 +79,6 @@
               </div>
               <div class="overview-stats" id="overviewStats"></div>
               <div class="overview-breakdown" id="libraryBreakdown"></div>
-            </section>
-
-            <section class="panel series-panel" aria-label="Tracked series">
-              <div class="panel-heading">
-                <div>
-                  <h2>Tracked series</h2>
-                  <p>Select a title to inspect its queue.</p>
-                </div>
-                <a class="icon-button" href="#toolsSection" aria-label="Jump to add series">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
-                </a>
-              </div>
-              <div class="series-list" id="seriesList"></div>
             </section>
           </div>
         </aside>
@@ -175,63 +192,7 @@
 
         <aside class="utility-rail" id="toolsSection" aria-label="Scanner tools">
           <div class="rail-scroll">
-            <section class="panel setup-panel" aria-label="Add series">
-              <div class="panel-heading">
-                <div>
-                  <h2>Add new series</h2>
-                  <p>Point the scanner at a supported title page and choose how it should archive new chapters.</p>
-                </div>
-              </div>
-
-              <form class="series-form" id="seriesForm">
-                <label class="field-span">
-                  <span>Source URL</span>
-                  <input name="source_url" type="url" required placeholder="https://example.com/manga" />
-                </label>
-                <label class="field-span">
-                  <span>Library title</span>
-                  <input name="title" type="text" required placeholder="e.g. My Hero Academia" />
-                </label>
-                <label class="field-span">
-                  <span>Save Folder</span>
-                  <input name="folder" type="text" placeholder="D:\\Manga\\My Hero Academia" />
-                </label>
-                <label class="field-span">
-                  <span>Check interval</span>
-                  <span class="select-shell">
-                    <select name="check_interval_hours">
-                      <option value="0.5" selected>30 minutes</option>
-                      <option value="1">1 hour</option>
-                      <option value="2">2 hours</option>
-                      <option value="6">6 hours</option>
-                      <option value="12">12 hours</option>
-                      <option value="24">24 hours</option>
-                      <option value="48">48 hours</option>
-                      <option value="72">72 hours</option>
-                      <option value="168">1 week</option>
-                    </select>
-                    <span class="select-caret" aria-hidden="true"></span>
-                  </span>
-                </label>
-                <label class="field-span">
-                  <span>Naming format</span>
-                  <input name="naming_format" type="text" placeholder="{title} - c{chapter} - {title} [{scanlators}].cbz" />
-                </label>
-                <div class="variable-list compact field-span" id="seriesNamingVariables"></div>
-                <label class="toggle-line">
-                  <input name="backfill_existing" type="checkbox" />
-                  <span>Download every chapter already listed on first scan</span>
-                </label>
-                <label class="toggle-line">
-                  <input name="enabled" type="checkbox" checked />
-                  <span>Keep monitoring this series for new chapters</span>
-                </label>
-                <button class="primary-action field-span" type="submit">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
-                  <span>Track series</span>
-                </button>
-              </form>
-            </section>
+            <section class="panel sidebar-panel" id="sidebarPanel" aria-label="Series sidebar"></section>
 
             <section class="panel activity-panel" id="activitySection" aria-label="Activity">
               <div class="panel-heading">
@@ -329,6 +290,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260611k"></script>
+    <script src="/static/app.js?v=20260614b"></script>
   </body>
 </html>

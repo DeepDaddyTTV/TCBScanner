@@ -113,6 +113,10 @@ class QueueChapters(BaseModel):
     chapter_ids: list[int] = Field(default_factory=list, max_length=1000)
 
 
+class SeriesUpdate(SeriesCreate):
+    pass
+
+
 @app.on_event("startup")
 async def startup() -> None:
     global monitor_task
@@ -198,6 +202,18 @@ async def create_series(payload: SeriesCreate) -> dict[str, Any]:
     return {"series": series}
 
 
+@app.put("/api/series/{series_id}")
+async def update_series(series_id: int, payload: SeriesUpdate) -> dict[str, Any]:
+    if not store.get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found.")
+    data = payload.model_dump()
+    data["check_interval_minutes"] = int(round(float(data.pop("check_interval_hours")) * 60))
+    if not data["folder"]:
+        data["folder"] = data["title"]
+    series = store.update_series(series_id, data)
+    return {"series": series}
+
+
 @app.delete("/api/series/{series_id}")
 async def delete_series(series_id: int) -> dict[str, bool]:
     if not store.get_series(series_id):
@@ -267,9 +283,44 @@ async def retry_chapter(chapter_id: int) -> dict[str, Any]:
     return {"chapter": updated}
 
 
+@app.get("/api/chapters/{chapter_id}/file")
+async def get_chapter_file(chapter_id: int) -> FileResponse:
+    chapter = store.get_chapter(chapter_id)
+    if not chapter or not chapter.get("cbz_path"):
+        raise HTTPException(status_code=404, detail="Chapter file not found.")
+    file_path = Path(str(chapter["cbz_path"]))
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Chapter file not found.")
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.comicbook+zip",
+        filename=file_path.name,
+    )
+
+
 @app.get("/api/events")
-async def list_events(limit: int = 100) -> dict[str, Any]:
-    return {"events": store.list_events(max(1, min(limit, 250)))}
+async def list_events(limit: int = 100, series_id: int | None = None) -> dict[str, Any]:
+    bounded = max(1, min(limit, 250))
+    return {"events": store.list_events(bounded, series_id=series_id)}
+
+
+@app.get("/api/search")
+async def search_series(query: str, limit: int = 12) -> dict[str, Any]:
+    cleaned = " ".join(str(query or "").strip().split())
+    bounded = max(1, min(limit, 20))
+    if len(cleaned) < 2:
+        return {
+            "query": cleaned,
+            "library_matches": [],
+            "source_matches": [],
+        }
+    library_matches = store.search_series(cleaned, limit=bounded)
+    source_matches = await scraper.search_supported_series(cleaned, limit=bounded)
+    return {
+        "query": cleaned,
+        "library_matches": library_matches,
+        "source_matches": source_matches,
+    }
 
 
 def schedule_check(series_id: int) -> None:
