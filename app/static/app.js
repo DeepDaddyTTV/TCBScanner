@@ -51,8 +51,8 @@ const CHAPTER_FILTERS = [
   },
 ];
 
-const JIKAN_API_BASE = "https://api.jikan.moe/v4";
-const ART_CACHE_KEY = "tcbscanner-jikan-art-v5";
+const ART_CACHE_KEY = "tcbscanner-jikan-art-v6";
+const ARTWORK_API_PATH = "/api/artwork";
 const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const MIN_POSTER_CHOICES = 5;
 
@@ -182,16 +182,6 @@ function enqueueArtTask(task) {
   return artQueue;
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url, {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`Artwork lookup failed with ${response.status}.`);
-  }
-  return response.json();
-}
-
 function getArtworkForSeries(series) {
   if (!series) return null;
   const normalized = normalizeSeriesKey(series.title);
@@ -219,80 +209,27 @@ function getMockupCoverUrl(series) {
   return "";
 }
 
-function scoreJikanCandidate(title, candidate) {
-  const target = normalizeSeriesKey(title);
-  const targetWords = new Set(target.split(" ").filter(Boolean));
-  const candidateTitles = [
-    candidate.title,
-    candidate.title_english,
-    ...(candidate.titles || []).map((item) => item.title),
-  ]
-    .filter(Boolean)
-    .map(normalizeSeriesKey);
-
-  let bestScore = -Infinity;
-  for (const candidateTitle of candidateTitles) {
-    const candidateWords = new Set(candidateTitle.split(" ").filter(Boolean));
-    const overlap = [...targetWords].filter((word) => candidateWords.has(word)).length;
-    let score = overlap * 22;
-    if (candidateTitle === target) score += 180;
-    if (candidateTitle.startsWith(target) || target.startsWith(candidateTitle)) score += 70;
-    if (candidate.type === "Manga") score += 12;
-    if (candidate.status === "Publishing") score += 8;
-    score += Number(candidate.score || 0);
-    bestScore = Math.max(bestScore, score);
-  }
-
-  return bestScore;
-}
-
-function rankJikanCandidates(title, candidates) {
-  return [...(candidates || [])].sort((left, right) => {
-    const delta = scoreJikanCandidate(title, right) - scoreJikanCandidate(title, left);
-    if (delta) return delta;
-    return Number(right?.members || 0) - Number(left?.members || 0);
-  });
-}
-
-function candidateCoverImageUrl(candidate) {
-  const images = candidate?.images || {};
-  const webp = images.webp || {};
-  const jpg = images.jpg || {};
-  return webp.large_image_url || webp.image_url || jpg.large_image_url || jpg.image_url || "";
-}
-
-function pickBestJikanMatch(title, candidates) {
-  return rankJikanCandidates(title, candidates)[0] || null;
-}
-
-function posterChoicesFromCandidates(candidates) {
-  return dedupePosterChoices((candidates || []).map(candidateCoverImageUrl));
-}
-
-function buildArtEntry(candidate, existing = null, candidateChoices = []) {
-  const coverImageUrl = candidateCoverImageUrl(candidate) || existing?.cover_image_url || "";
+function buildArtEntry(payload, existing = null) {
+  const coverImageUrl = String(payload?.cover_image_url || existing?.cover_image_url || "").trim();
+  const heroImageUrl = String(payload?.hero_image_url || coverImageUrl || existing?.hero_image_url || "").trim() || coverImageUrl;
+  const resolvedChoices = Array.isArray(payload?.poster_choices) ? payload.poster_choices : [];
   const existingChoices = Array.isArray(existing?.poster_choices) ? existing.poster_choices : [];
   return {
     cached_at: Date.now(),
-    mal_id: candidate?.mal_id || existing?.mal_id || null,
-    title: candidate?.title || existing?.title || "",
-    mal_url: candidate?.url || existing?.mal_url || "",
+    mal_id: null,
+    title: existing?.title || "",
+    mal_url: "",
     cover_image_url: coverImageUrl,
-    hero_image_url: existing?.hero_image_url || coverImageUrl || "",
-    pictures_hydrated: existing?.pictures_hydrated || false,
-    poster_choices: dedupePosterChoices([coverImageUrl, ...candidateChoices, ...existingChoices]),
+    hero_image_url: heroImageUrl,
+    pictures_hydrated: true,
+    lookup_complete: true,
+    poster_choices: dedupePosterChoices([
+      coverImageUrl,
+      heroImageUrl,
+      ...resolvedChoices,
+      ...existingChoices,
+    ]),
   };
-}
-
-function getPictureUrl(picture) {
-  if (!picture) return "";
-  return (
-    picture?.webp?.large_image_url ||
-    picture?.webp?.image_url ||
-    picture?.jpg?.large_image_url ||
-    picture?.jpg?.image_url ||
-    ""
-  );
 }
 
 function dedupePosterChoices(choices) {
@@ -311,65 +248,23 @@ async function fetchSeriesArtwork(series, options = {}) {
   const { forceRefresh = false } = options;
   const cacheKey = normalizeSeriesKey(series.title);
   const cached = state.seriesArt[cacheKey];
-  if (cached && !forceRefresh && artworkChoiceCount(cached) >= MIN_POSTER_CHOICES) {
+  if (cached && !forceRefresh) {
     return cached;
   }
 
-  const query = encodeURIComponent(series.title);
-  const search = await fetchJson(`${JIKAN_API_BASE}/manga?q=${query}&limit=10`);
-  const rankedCandidates = rankJikanCandidates(series.title, search.data || []);
-  const match = rankedCandidates[0] || null;
-  if (!match) return cached || null;
+  const params = new URLSearchParams({
+    title: String(series?.title || ""),
+    source_url: String(series?.source_url || ""),
+  });
+  const resolved = await api(`${ARTWORK_API_PATH}?${params.toString()}`);
+  if (!resolved?.cover_image_url && !(resolved?.poster_choices || []).length) {
+    return cached || null;
+  }
 
-  const entry = buildArtEntry(match, cached, posterChoicesFromCandidates(rankedCandidates.slice(0, 10)));
+  const entry = buildArtEntry(resolved, cached);
   state.seriesArt[cacheKey] = entry;
   persistArtCache();
-
-  if (entry.mal_id && (!entry.pictures_hydrated || artworkChoiceCount(entry) < MIN_POSTER_CHOICES)) {
-    void enqueueArtTask(() => hydrateHeroArtwork(cacheKey, entry.mal_id));
-  }
-
   return entry;
-}
-
-async function hydrateHeroArtwork(cacheKey, malId) {
-  const current = state.seriesArt[cacheKey];
-  if (!current || current.pictures_hydrated) return current;
-
-  try {
-    const response = await fetchJson(`${JIKAN_API_BASE}/manga/${malId}/pictures`);
-    const pictures = response.data || [];
-    const pictureUrls = pictures.map(getPictureUrl).filter(Boolean);
-    const coverUrl = pictureUrls[0] || current.cover_image_url;
-    const heroUrl =
-      pictureUrls.find((url) => url !== coverUrl) ||
-      pictureUrls[1] ||
-      coverUrl ||
-      current.hero_image_url ||
-      current.cover_image_url;
-
-    state.seriesArt[cacheKey] = {
-      ...current,
-      cached_at: Date.now(),
-      cover_image_url: coverUrl || current.cover_image_url,
-      hero_image_url: heroUrl || current.cover_image_url,
-      pictures_hydrated: true,
-      poster_choices: dedupePosterChoices([
-        current.cover_image_url,
-        current.hero_image_url,
-        coverUrl,
-        heroUrl,
-        ...pictureUrls,
-        ...(current.poster_choices || []),
-      ]),
-    };
-    persistArtCache();
-    renderArtwork();
-    return state.seriesArt[cacheKey];
-  } catch (error) {
-    console.warn(error);
-    return current;
-  }
 }
 
 async function queueArtworkHydration(seriesList = state.series) {
@@ -400,17 +295,16 @@ async function openPosterPicker(selected) {
   state.posterChoices = [];
   renderSidebar();
   try {
-    const cacheKey = normalizeSeriesKey(selected.title);
     let art = getArtworkForSeries(selected);
-    if (!art || artworkChoiceCount(art) < MIN_POSTER_CHOICES) {
-      art = await fetchSeriesArtwork(selected, { forceRefresh: artworkChoiceCount(art) < MIN_POSTER_CHOICES });
-    }
-    if (art?.mal_id && (!art?.pictures_hydrated || artworkChoiceCount(art) < MIN_POSTER_CHOICES)) {
-      art = await hydrateHeroArtwork(cacheKey, art.mal_id);
+    if (!art || (!art.lookup_complete && artworkChoiceCount(art) < MIN_POSTER_CHOICES)) {
+      art = await fetchSeriesArtwork(selected, {
+        forceRefresh: !art || (!art.lookup_complete && artworkChoiceCount(art) < MIN_POSTER_CHOICES),
+      });
     }
     const latest = art || getArtworkForSeries(selected);
     state.posterChoices = dedupePosterChoices([
       latest?.cover_image_url,
+      latest?.hero_image_url,
       ...(latest?.poster_choices || []),
       getMockupCoverUrl(selected),
     ]);

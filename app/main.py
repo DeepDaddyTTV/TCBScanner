@@ -200,6 +200,19 @@ async def get_meta() -> dict[str, Any]:
     }
 
 
+@app.get("/api/artwork")
+async def get_artwork(title: str, source_url: str) -> dict[str, Any]:
+    cleaned_title = " ".join(str(title or "").strip().split())
+    cleaned_url = str(source_url or "").strip()
+    if not cleaned_title or not cleaned_url.startswith(("http://", "https://")):
+        return {
+            "cover_image_url": "",
+            "hero_image_url": "",
+            "poster_choices": [],
+        }
+    return await scraper.resolve_series_artwork(cleaned_title, cleaned_url)
+
+
 @app.post("/api/settings")
 async def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
     store.set_setting(

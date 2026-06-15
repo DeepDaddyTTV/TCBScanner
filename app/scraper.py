@@ -24,6 +24,28 @@ BROWSERLIKE_HEADERS = {
     "Accept-Language": HEADERS["Accept-Language"],
 }
 
+MANGADEX_API_BASE = "https://api.mangadex.org"
+MANGADEX_COVERS_BASE = "https://uploads.mangadex.org/covers"
+
+SERIES_ART_META_SELECTORS = (
+    ("meta[property='og:image']", "content"),
+    ("meta[name='twitter:image']", "content"),
+    ("meta[itemprop='image']", "content"),
+    ("meta[name='twitter:image:src']", "content"),
+)
+
+SERIES_ART_IMAGE_SELECTORS = (
+    ".summary_image img",
+    ".summary-content img",
+    ".profile-manga.summary-layout-1 img",
+    ".tab-summary img",
+    ".post-content_item .summary_image img",
+    ".series-information img",
+    ".series-profile img",
+    ".thumb img",
+    ".post-title-item img",
+)
+
 TCB_SITES = (
     {
         "name": "TCB One Piece Chapters",
@@ -214,6 +236,23 @@ def fetch_bytes_with_requests(url: str, referer: str | None = None) -> tuple[byt
     return response.content, response.headers.get("content-type", "")
 
 
+def fetch_mangadex_search_with_requests(query: str, limit: int) -> dict[str, object]:
+    import requests
+
+    response = requests.get(
+        f"{MANGADEX_API_BASE}/manga",
+        params=[
+            ("title", query),
+            ("limit", limit),
+            ("includes[]", "cover_art"),
+        ],
+        timeout=30,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def list_supported_sources() -> list[dict[str, object]]:
     return [
         {
@@ -235,6 +274,186 @@ def list_supported_sources() -> list[dict[str, object]]:
 
 def supported_source_count() -> int:
     return sum(len(group["sites"]) for group in SUPPORTED_SOURCE_GROUPS)
+
+
+def normalize_artwork_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def dedupe_urls(urls: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for url in urls:
+        cleaned = normalize_url(url) if url else ""
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        ordered.append(cleaned)
+    return ordered
+
+
+def artwork_query_variants(title: str, source_url: str) -> list[str]:
+    variants = [normalize_artwork_key(title)]
+    slug = urlparse(source_url).path.rstrip("/").split("/")[-1] if source_url else ""
+    slug = re.sub(r"[-_](?:\d+)$", "", slug)
+    slug = normalize_artwork_key(slug)
+    if slug:
+        variants.append(slug)
+    return [item for item in dict.fromkeys(variants) if item]
+
+
+def artwork_match_score(target: str, candidate: str) -> float:
+    target_key = normalize_artwork_key(target)
+    candidate_key = normalize_artwork_key(candidate)
+    if not target_key or not candidate_key:
+        return 0.0
+    target_words = [word for word in target_key.split() if word]
+    candidate_words = [word for word in candidate_key.split() if word]
+    if not target_words or not candidate_words:
+        return 0.0
+    target_set = set(target_words)
+    candidate_set = set(candidate_words)
+    overlap = len(target_set & candidate_set)
+    if not overlap:
+        return 0.0
+    coverage = overlap / len(target_set)
+    precision = overlap / len(candidate_set)
+    score = overlap * 20 + coverage * 100 + precision * 35
+    if candidate_key == target_key:
+        score += 180
+    elif candidate_key.startswith(target_key) or target_key.startswith(candidate_key):
+        score += 90
+    return score
+
+
+def is_confident_artwork_match(query: str, candidate_titles: list[str]) -> tuple[bool, float]:
+    best = max((artwork_match_score(query, candidate) for candidate in candidate_titles), default=0.0)
+    return best >= 120.0, best
+
+
+def mangadex_title_variants(attributes: dict[str, object]) -> list[str]:
+    titles: list[str] = []
+    title_block = attributes.get("title")
+    if isinstance(title_block, dict):
+        titles.extend(str(value).strip() for value in title_block.values() if str(value).strip())
+    alt_titles = attributes.get("altTitles")
+    if isinstance(alt_titles, list):
+        for entry in alt_titles:
+            if isinstance(entry, dict):
+                titles.extend(str(value).strip() for value in entry.values() if str(value).strip())
+    return list(dict.fromkeys(titles))
+
+
+def mangadex_cover_filename(relationships: list[dict[str, object]]) -> str:
+    for relationship in relationships:
+        if relationship.get("type") != "cover_art":
+            continue
+        attributes = relationship.get("attributes")
+        if isinstance(attributes, dict):
+            file_name = str(attributes.get("fileName") or "").strip()
+            if file_name:
+                return file_name
+    return ""
+
+
+def absolute_image_url(base_url: str, raw_url: str) -> str:
+    if not raw_url:
+        return ""
+    return normalize_url(urljoin(base_url, raw_url))
+
+
+async def extract_series_page_artwork(source_url: str) -> list[str]:
+    html = await fetch_html(source_url)
+    soup = BeautifulSoup(html, "lxml")
+    image_urls: list[str] = []
+
+    for selector, attribute in SERIES_ART_META_SELECTORS:
+        for node in soup.select(selector):
+            value = str(node.get(attribute) or "").strip()
+            if value:
+                image_urls.append(absolute_image_url(source_url, value))
+
+    for selector in SERIES_ART_IMAGE_SELECTORS:
+        for node in soup.select(selector):
+            value = str(node.get("data-src") or node.get("src") or "").strip()
+            if value:
+                image_urls.append(absolute_image_url(source_url, value))
+
+    return dedupe_urls(image_urls)
+
+
+async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 12) -> list[str]:
+    queries = artwork_query_variants(title, source_url)
+    if not queries:
+        return []
+
+    ranked: list[tuple[float, str]] = []
+    seen_urls: set[str] = set()
+
+    for query in queries:
+        payload = await asyncio.to_thread(
+            fetch_mangadex_search_with_requests,
+            query,
+            limit,
+        )
+        for item in payload.get("data", []):
+            if not isinstance(item, dict):
+                continue
+            attributes = item.get("attributes")
+            if not isinstance(attributes, dict):
+                continue
+            candidate_titles = mangadex_title_variants(attributes)
+            confident, score = is_confident_artwork_match(query, candidate_titles)
+            if not confident:
+                continue
+            relationships = item.get("relationships")
+            if not isinstance(relationships, list):
+                continue
+            file_name = mangadex_cover_filename(relationships)
+            manga_id = str(item.get("id") or "").strip()
+            if not manga_id or not file_name:
+                continue
+            cover_url = f"{MANGADEX_COVERS_BASE}/{manga_id}/{file_name}.512.jpg"
+            if cover_url in seen_urls:
+                continue
+            seen_urls.add(cover_url)
+            ranked.append((score, cover_url))
+
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [url for _, url in ranked]
+
+
+async def resolve_series_artwork(title: str, source_url: str) -> dict[str, object]:
+    source_choices: list[str] = []
+    mangadex_choices: list[str] = []
+
+    try:
+        source_choices = await extract_series_page_artwork(source_url)
+    except Exception:
+        source_choices = []
+
+    try:
+        mangadex_choices = await search_mangadex_cover_art(title, source_url)
+    except Exception:
+        mangadex_choices = []
+
+    poster_choices = dedupe_urls([*source_choices, *mangadex_choices])
+    cover_image_url = source_choices[0] if source_choices else (mangadex_choices[0] if mangadex_choices else "")
+    hero_image_url = (
+        source_choices[1]
+        if len(source_choices) > 1
+        else source_choices[0]
+        if source_choices
+        else mangadex_choices[0]
+        if mangadex_choices
+        else ""
+    )
+
+    return {
+        "cover_image_url": cover_image_url,
+        "hero_image_url": hero_image_url or cover_image_url,
+        "poster_choices": poster_choices,
+    }
 
 
 async def search_supported_series(query: str, limit: int = 12) -> list[dict[str, object]]:

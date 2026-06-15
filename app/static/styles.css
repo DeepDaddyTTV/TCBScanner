@@ -5840,6 +5840,7 @@ select,
 .library-rail > .rail-scroll {
   display: grid;
   grid-template-rows: auto auto;
+  align-content: start;
   gap: 0;
   max-height: none;
   overflow: auto;
@@ -5848,9 +5849,9 @@ select,
 
 .series-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: clamp(360px, 48vh, 620px);
-  overflow: hidden;
+  grid-template-rows: auto auto;
+  min-height: 0;
+  overflow: visible;
 }
 
 .series-panel-chrome {
@@ -5912,7 +5913,7 @@ select,
 
 .series-list {
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
 }
 
 .theme-select-caret {
