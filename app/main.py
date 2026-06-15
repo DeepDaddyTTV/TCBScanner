@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -84,6 +86,33 @@ def parse_library_roots() -> list[Path]:
         seen.add(normalized)
         unique.append(Path(normalized))
     return unique or [LIBRARY_DIR]
+
+
+def artwork_url_is_public(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+
+    if parsed.scheme not in {"http", "https"}:
+        return False
+
+    host = (parsed.hostname or "").strip()
+    if not host:
+        return False
+
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+
+    if address is not None:
+        if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+            return False
+    elif host.lower() in {"localhost"}:
+        return False
+
+    return True
 
 
 SCHEDULER_POLL_SECONDS = scheduler_poll_seconds()
@@ -211,6 +240,25 @@ async def get_artwork(title: str, source_url: str) -> dict[str, Any]:
             "poster_choices": [],
         }
     return await scraper.resolve_series_artwork(cleaned_title, cleaned_url)
+
+
+@app.get("/api/artwork/image")
+async def get_artwork_image(url: str) -> Response:
+    cleaned_url = str(url or "").strip()
+    if not artwork_url_is_public(cleaned_url):
+        raise HTTPException(status_code=400, detail="Enter a public artwork URL.")
+
+    try:
+        payload, content_type = await scraper.fetch_bytes(cleaned_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Unable to fetch artwork image.") from exc
+
+    media_type = (content_type or "image/jpeg").split(";")[0].strip() or "image/jpeg"
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.post("/api/settings")

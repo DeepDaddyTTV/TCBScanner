@@ -51,7 +51,7 @@ const CHAPTER_FILTERS = [
   },
 ];
 
-const ART_CACHE_KEY = "tcbscanner-jikan-art-v9";
+const ART_CACHE_KEY = "tcbscanner-series-art-v10";
 const ARTWORK_API_PATH = "/api/artwork";
 const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const MIN_POSTER_CHOICES = 5;
@@ -194,6 +194,13 @@ function selectArtworkUrl(entry, preferred = "hero") {
     return entry.hero_image_url || entry.cover_image_url || "";
   }
   return entry.cover_image_url || entry.hero_image_url || "";
+}
+
+function proxyImageUrl(url) {
+  const cleaned = String(url || "").trim();
+  if (!cleaned) return "";
+  if (!/^https?:\/\//i.test(cleaned)) return cleaned;
+  return `/api/artwork/image?url=${encodeURIComponent(cleaned)}`;
 }
 
 function getSeriesCoverUrl(series, art) {
@@ -865,7 +872,7 @@ function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
       <div class="series-cover${coverUrl ? "" : " fallback"}">
         ${
           coverUrl
-            ? `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`
+            ? `<img src="${escapeHtml(proxyImageUrl(coverUrl))}" alt="" loading="lazy" />`
             : `<div class="series-mark">${escapeHtml(seriesMark(series.title))}</div>`
         }
       </div>
@@ -920,7 +927,7 @@ function renderSearchSuggestionCard(match, index) {
       <div class="series-cover${coverUrl ? "" : " fallback"}">
         ${
           coverUrl
-            ? `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`
+            ? `<img src="${escapeHtml(proxyImageUrl(coverUrl))}" alt="" loading="lazy" />`
             : `<div class="series-mark">${escapeHtml(seriesMark(match.title))}</div>`
         }
       </div>
@@ -971,7 +978,7 @@ function renderSeriesFocus() {
   const heroUrl = selectArtworkUrl(art, "hero") || selectArtworkUrl(art, "cover");
   const seriesSlug = normalizeSeriesKey(focusSeries.title).replaceAll(" ", "-");
   const useMockupArt = false;
-  const focusArtUrl = useMockupArt ? "/static/mockup_assets/hero-art.png" : heroUrl;
+  const focusArtUrl = useMockupArt ? "/static/mockup_assets/hero-art.png" : proxyImageUrl(heroUrl);
   const focusDensityClass = getFocusDensityClass(focusSeries.title);
   const focusEmblem = getFocusEmblem(focusSeries, art, useMockupArt);
   const artStyle = focusArtUrl
@@ -1387,7 +1394,7 @@ function renderPosterPicker(selected) {
       <div class="poster-picker-current">
         ${
           selectedUrl
-            ? `<img src="${escapeHtml(selectedUrl)}" alt="" loading="lazy" />`
+            ? `<img src="${escapeHtml(proxyImageUrl(selectedUrl))}" alt="" loading="lazy" />`
             : `<div class="series-mark">${escapeHtml(seriesMark(selected.title))}</div>`
         }
       </div>
@@ -1405,7 +1412,7 @@ function renderPosterPicker(selected) {
                       .map(
                         (url) => `
                           <button class="poster-choice${selected.poster_image_url === url ? " active" : ""}" type="button" data-poster-url="${escapeHtml(url)}">
-                            <img src="${escapeHtml(url)}" alt="" loading="lazy" />
+                            <img src="${escapeHtml(proxyImageUrl(url))}" alt="" loading="lazy" />
                           </button>
                         `,
                       )
@@ -2382,7 +2389,7 @@ function getFocusEmblem(series, art, useMockupArt) {
   if (coverUrl) {
     return {
       className: "focus-emblem cover-emblem",
-      markup: `<img src="${escapeHtml(coverUrl)}" alt="" loading="lazy" />`,
+      markup: `<img src="${escapeHtml(proxyImageUrl(coverUrl))}" alt="" loading="lazy" />`,
     };
   }
 

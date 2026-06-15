@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from pathlib import PurePosixPath
+from time import monotonic
 from urllib.parse import quote_plus, urljoin, urlparse
 
 import httpx
@@ -24,6 +25,9 @@ BROWSERLIKE_HEADERS = {
     "Accept-Language": HEADERS["Accept-Language"],
 }
 
+ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
+KITSU_API_BASE = "https://kitsu.io/api/edge"
+JIKAN_API_BASE = "https://api.jikan.moe/v4"
 MANGADEX_API_BASE = "https://api.mangadex.org"
 MANGADEX_COVERS_BASE = "https://uploads.mangadex.org/covers"
 MANGADEX_MAX_COVER_FETCH = 100
@@ -41,6 +45,10 @@ MANGADEX_ARTWORK_VARIANT_WORDS = {
     "premium",
     "full",
 }
+ARTWORK_SEARCH_LIMIT = 5
+ARTWORK_MIN_POSTER_CHOICES = 5
+ARTWORK_CACHE_TTL_SECONDS = 60 * 60 * 12
+JIKAN_REQUEST_GAP_SECONDS = 1.25
 
 SERIES_ART_META_SELECTORS = (
     ("meta[property='og:image']", "content"),
@@ -203,6 +211,18 @@ class SourceSearchCandidate:
     family: str
 
 
+@dataclass
+class ArtworkMetadata:
+    cover_image_url: str = ""
+    hero_image_url: str = ""
+    poster_choices: list[str] = field(default_factory=list)
+
+
+ARTWORK_RESPONSE_CACHE: dict[tuple[str, str], tuple[float, dict[str, object]]] = {}
+JIKAN_REQUEST_LOCK: asyncio.Lock | None = None
+JIKAN_LAST_REQUEST_AT = 0.0
+
+
 async def fetch_html(url: str) -> str:
     try:
         async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
@@ -284,6 +304,90 @@ def fetch_mangadex_covers_with_requests(manga_id: str, limit: int) -> dict[str, 
     return response.json()
 
 
+def fetch_anilist_search_with_requests(query: str, limit: int) -> dict[str, object]:
+    import requests
+
+    response = requests.post(
+        ANILIST_GRAPHQL_URL,
+        json={
+            "query": """
+                query ($search: String, $perPage: Int) {
+                  Page(perPage: $perPage) {
+                    media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
+                      id
+                      format
+                      countryOfOrigin
+                      title {
+                        romaji
+                        english
+                        native
+                        userPreferred
+                      }
+                      synonyms
+                      coverImage {
+                        extraLarge
+                        large
+                        medium
+                      }
+                      bannerImage
+                    }
+                  }
+                }
+            """,
+            "variables": {
+                "search": query,
+                "perPage": max(1, min(limit, 10)),
+            },
+        },
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": HEADERS["User-Agent"],
+        },
+        timeout=30,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_kitsu_search_with_requests(query: str, limit: int) -> dict[str, object]:
+    import requests
+
+    response = requests.get(
+        f"{KITSU_API_BASE}/manga",
+        params={
+            "filter[text]": query,
+            "page[limit]": max(1, min(limit, 10)),
+        },
+        headers={
+            "Accept": "application/vnd.api+json",
+            "User-Agent": HEADERS["User-Agent"],
+        },
+        timeout=30,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_jikan_json_with_requests(path: str, params: dict[str, object] | None = None) -> dict[str, object]:
+    import requests
+
+    response = requests.get(
+        f"{JIKAN_API_BASE}{path}",
+        params=params or None,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": HEADERS["User-Agent"],
+        },
+        timeout=30,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def list_supported_sources() -> list[dict[str, object]]:
     return [
         {
@@ -356,6 +460,177 @@ def artwork_match_rank(query_variants: set[str], candidate_titles: list[str]) ->
     return 0
 
 
+def artwork_cache_key(title: str, source_url: str) -> tuple[str, str]:
+    return normalize_artwork_key(title), normalize_url(source_url)
+
+
+def get_cached_artwork(title: str, source_url: str) -> dict[str, object] | None:
+    cache_entry = ARTWORK_RESPONSE_CACHE.get(artwork_cache_key(title, source_url))
+    if not cache_entry:
+        return None
+    cached_at, payload = cache_entry
+    if monotonic() - cached_at >= ARTWORK_CACHE_TTL_SECONDS:
+        ARTWORK_RESPONSE_CACHE.pop(artwork_cache_key(title, source_url), None)
+        return None
+    return payload
+
+
+def set_cached_artwork(title: str, source_url: str, payload: dict[str, object]) -> dict[str, object]:
+    ARTWORK_RESPONSE_CACHE[artwork_cache_key(title, source_url)] = (monotonic(), payload)
+    return payload
+
+
+def preferred_artwork_url(*values: str) -> str:
+    for value in values:
+        cleaned = str(value or "").strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def merge_artwork_choices(*choice_groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    for group in choice_groups:
+        merged.extend(group)
+    return dedupe_urls(merged)
+
+
+def anilist_title_variants(item: dict[str, object]) -> list[str]:
+    titles: list[str] = []
+    title_block = item.get("title")
+    if isinstance(title_block, dict):
+        titles.extend(str(value).strip() for value in title_block.values() if str(value).strip())
+    synonyms = item.get("synonyms")
+    if isinstance(synonyms, list):
+        titles.extend(str(value).strip() for value in synonyms if str(value).strip())
+    return list(dict.fromkeys(titles))
+
+
+def anilist_format_rank(value: object) -> int:
+    normalized = str(value or "").strip().upper()
+    return {
+        "MANGA": 0,
+        "ONE_SHOT": 1,
+        "NOVEL": 8,
+    }.get(normalized, 4)
+
+
+def anilist_cover_url(item: dict[str, object]) -> str:
+    cover_block = item.get("coverImage")
+    if not isinstance(cover_block, dict):
+        return ""
+    return preferred_artwork_url(
+        str(cover_block.get("extraLarge") or "").strip(),
+        str(cover_block.get("large") or "").strip(),
+        str(cover_block.get("medium") or "").strip(),
+    )
+
+
+def kitsu_title_variants(attributes: dict[str, object]) -> list[str]:
+    titles: list[str] = []
+    titles.append(str(attributes.get("canonicalTitle") or "").strip())
+    titles.append(str(attributes.get("slug") or "").replace("-", " ").strip())
+    abbreviated = attributes.get("abbreviatedTitles")
+    if isinstance(abbreviated, list):
+        titles.extend(str(value).strip() for value in abbreviated if str(value).strip())
+    title_block = attributes.get("titles")
+    if isinstance(title_block, dict):
+        titles.extend(str(value).strip() for value in title_block.values() if str(value).strip())
+    return [item for item in dict.fromkeys(titles) if item]
+
+
+def kitsu_subtype_rank(value: object) -> int:
+    normalized = str(value or "").strip().lower()
+    return {
+        "manga": 0,
+        "manhwa": 0,
+        "manhua": 0,
+        "oel": 0,
+        "oneshot": 1,
+        "doujin": 2,
+        "novel": 8,
+    }.get(normalized, 4)
+
+
+def kitsu_image_url(image_block: object) -> str:
+    if not isinstance(image_block, dict):
+        return ""
+    return preferred_artwork_url(
+        str(image_block.get("original") or "").strip(),
+        str(image_block.get("large") or "").strip(),
+        str(image_block.get("medium") or "").strip(),
+        str(image_block.get("small") or "").strip(),
+    )
+
+
+def jikan_title_variants(item: dict[str, object]) -> list[str]:
+    titles: list[str] = [
+        str(item.get("title") or "").strip(),
+        str(item.get("title_english") or "").strip(),
+        str(item.get("title_japanese") or "").strip(),
+    ]
+    variants = item.get("titles")
+    if isinstance(variants, list):
+        for entry in variants:
+            if isinstance(entry, dict):
+                titles.append(str(entry.get("title") or "").strip())
+    return [item for item in dict.fromkeys(titles) if item]
+
+
+def jikan_type_rank(value: object) -> int:
+    normalized = str(value or "").strip().lower()
+    return {
+        "manga": 0,
+        "manhwa": 0,
+        "manhua": 0,
+        "one-shot": 1,
+        "doujinshi": 2,
+        "light novel": 8,
+        "novel": 8,
+    }.get(normalized, 4)
+
+
+def jikan_primary_image_url(item: dict[str, object]) -> str:
+    images = item.get("images")
+    if not isinstance(images, dict):
+        return ""
+    for key in ("jpg", "webp"):
+        image_block = images.get(key)
+        if isinstance(image_block, dict):
+            resolved = preferred_artwork_url(
+                str(image_block.get("large_image_url") or "").strip(),
+                str(image_block.get("image_url") or "").strip(),
+                str(image_block.get("small_image_url") or "").strip(),
+            )
+            if resolved:
+                return resolved
+    return ""
+
+
+def jikan_picture_urls(payload: dict[str, object], limit: int) -> list[str]:
+    urls: list[str] = []
+    for item in payload.get("data", []):
+        if not isinstance(item, dict):
+            continue
+        urls.append(
+            preferred_artwork_url(
+                str(item.get("jpg", {}).get("large_image_url") or "").strip()
+                if isinstance(item.get("jpg"), dict)
+                else "",
+                str(item.get("jpg", {}).get("image_url") or "").strip()
+                if isinstance(item.get("jpg"), dict)
+                else "",
+                str(item.get("webp", {}).get("large_image_url") or "").strip()
+                if isinstance(item.get("webp"), dict)
+                else "",
+                str(item.get("webp", {}).get("image_url") or "").strip()
+                if isinstance(item.get("webp"), dict)
+                else "",
+            )
+        )
+    return dedupe_urls(urls)[:limit]
+
+
 def mangadex_title_variants(attributes: dict[str, object]) -> list[str]:
     titles: list[str] = []
     title_block = attributes.get("title")
@@ -424,7 +699,10 @@ def is_generic_series_artwork_url(url: str) -> bool:
     file_name = PurePosixPath(lowered_path).name
     stem = PurePosixPath(file_name).stem.lower()
 
-    if lowered_path.endswith(".svg"):
+    if lowered_path.endswith((".svg", ".gif")):
+        return True
+
+    if re.search(r"/img/ch\d+", lowered_path):
         return True
 
     blocked_tokens = (
@@ -464,6 +742,172 @@ async def extract_series_page_artwork(source_url: str) -> list[str]:
                     image_urls.append(resolved)
 
     return dedupe_urls(image_urls)
+
+
+async def search_anilist_artwork(title: str, source_url: str) -> ArtworkMetadata:
+    queries = artwork_query_variants(title, source_url)
+    query_variants = set(queries)
+    if not query_variants:
+        return ArtworkMetadata()
+
+    matches: list[tuple[int, int, dict[str, object]]] = []
+    seen_ids: set[str] = set()
+    for query in queries:
+        payload = await asyncio.to_thread(fetch_anilist_search_with_requests, query, ARTWORK_SEARCH_LIMIT)
+        media = payload.get("data", {}).get("Page", {}).get("media", [])
+        if not isinstance(media, list):
+            continue
+        for item in media:
+            if not isinstance(item, dict):
+                continue
+            match_rank = artwork_match_rank(query_variants, anilist_title_variants(item))
+            if not match_rank:
+                continue
+            item_id = str(item.get("id") or "").strip()
+            if not item_id or item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            matches.append((match_rank, anilist_format_rank(item.get("format")), item))
+
+    if not matches:
+        return ArtworkMetadata()
+
+    matches.sort(key=lambda item: (-item[0], item[1], str(item[2].get("id") or "")))
+    best = matches[0][2]
+    cover_url = anilist_cover_url(best)
+    hero_url = preferred_artwork_url(str(best.get("bannerImage") or "").strip(), cover_url)
+    return ArtworkMetadata(
+        cover_image_url=cover_url,
+        hero_image_url=hero_url,
+        poster_choices=dedupe_urls([cover_url]),
+    )
+
+
+async def search_kitsu_artwork(title: str, source_url: str) -> ArtworkMetadata:
+    queries = artwork_query_variants(title, source_url)
+    query_variants = set(queries)
+    if not query_variants:
+        return ArtworkMetadata()
+
+    matches: list[tuple[int, int, dict[str, object]]] = []
+    seen_ids: set[str] = set()
+    for query in queries:
+        payload = await asyncio.to_thread(fetch_kitsu_search_with_requests, query, ARTWORK_SEARCH_LIMIT)
+        results = payload.get("data", [])
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            attributes = item.get("attributes")
+            if not isinstance(attributes, dict):
+                continue
+            match_rank = artwork_match_rank(query_variants, kitsu_title_variants(attributes))
+            if not match_rank:
+                continue
+            item_id = str(item.get("id") or "").strip()
+            if not item_id or item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            matches.append((match_rank, kitsu_subtype_rank(attributes.get("subtype")), attributes))
+
+    if not matches:
+        return ArtworkMetadata()
+
+    matches.sort(key=lambda item: (-item[0], item[1], str(item[2].get("canonicalTitle") or "")))
+    best = matches[0][2]
+    poster_url = kitsu_image_url(best.get("posterImage"))
+    hero_url = preferred_artwork_url(kitsu_image_url(best.get("coverImage")), poster_url)
+    return ArtworkMetadata(
+        cover_image_url=poster_url,
+        hero_image_url=hero_url,
+        poster_choices=dedupe_urls([poster_url, hero_url]),
+    )
+
+
+def get_jikan_request_lock() -> asyncio.Lock:
+    global JIKAN_REQUEST_LOCK
+    if JIKAN_REQUEST_LOCK is None:
+        JIKAN_REQUEST_LOCK = asyncio.Lock()
+    return JIKAN_REQUEST_LOCK
+
+
+async def fetch_jikan_json(path: str, params: dict[str, object] | None = None) -> dict[str, object]:
+    global JIKAN_LAST_REQUEST_AT
+
+    for attempt in range(3):
+        async with get_jikan_request_lock():
+            wait_seconds = JIKAN_REQUEST_GAP_SECONDS - (monotonic() - JIKAN_LAST_REQUEST_AT)
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+            JIKAN_LAST_REQUEST_AT = monotonic()
+        try:
+            return await asyncio.to_thread(fetch_jikan_json_with_requests, path, params)
+        except Exception as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code == 429 and attempt < 2:
+                await asyncio.sleep((attempt + 1) * 1.5)
+                continue
+            if status_code == 404:
+                return {}
+            raise
+    return {}
+
+
+async def search_jikan_artwork(title: str, source_url: str, limit: int = 8) -> ArtworkMetadata:
+    queries = artwork_query_variants(title, source_url)
+    query_variants = set(queries)
+    if not query_variants:
+        return ArtworkMetadata()
+
+    matches: list[tuple[int, int, dict[str, object]]] = []
+    seen_ids: set[str] = set()
+    for query in queries:
+        payload = await fetch_jikan_json(
+            "/manga",
+            {
+                "q": query,
+                "limit": ARTWORK_SEARCH_LIMIT,
+                "sfw": "true",
+            },
+        )
+        results = payload.get("data", [])
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            match_rank = artwork_match_rank(query_variants, jikan_title_variants(item))
+            if not match_rank:
+                continue
+            item_id = str(item.get("mal_id") or "").strip()
+            if not item_id or item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            matches.append((match_rank, jikan_type_rank(item.get("type")), item))
+
+    if not matches:
+        return ArtworkMetadata()
+
+    matches.sort(key=lambda item: (-item[0], item[1], str(item[2].get("mal_id") or "")))
+    best = matches[0][2]
+    primary_url = jikan_primary_image_url(best)
+    picture_urls: list[str] = []
+    mal_id = str(best.get("mal_id") or "").strip()
+    if mal_id:
+        try:
+            pictures_payload = await fetch_jikan_json(f"/manga/{mal_id}/pictures")
+            picture_urls = jikan_picture_urls(pictures_payload, max(limit, 1))
+        except Exception:
+            picture_urls = []
+
+    poster_choices = dedupe_urls([primary_url, *picture_urls])[: max(limit, 1)]
+    cover_url = primary_url or (poster_choices[0] if poster_choices else "")
+    return ArtworkMetadata(
+        cover_image_url=cover_url,
+        hero_image_url=cover_url,
+        poster_choices=poster_choices,
+    )
 
 
 async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 8) -> list[str]:
@@ -516,36 +960,70 @@ async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 8)
 
 
 async def resolve_series_artwork(title: str, source_url: str) -> dict[str, object]:
-    source_choices: list[str] = []
-    mangadex_choices: list[str] = []
+    cached = get_cached_artwork(title, source_url)
+    if cached is not None:
+        return cached
 
+    source_choices: list[str] = []
     try:
         source_choices = await extract_series_page_artwork(source_url)
     except Exception:
         source_choices = []
 
-    try:
-        mangadex_choices = await search_mangadex_cover_art(title, source_url)
-    except Exception:
-        mangadex_choices = []
+    source_cover = source_choices[0] if source_choices else ""
 
-    poster_choices = dedupe_urls([*source_choices, *mangadex_choices])
-    cover_image_url = source_choices[0] if source_choices else (mangadex_choices[0] if mangadex_choices else "")
-    hero_image_url = (
-        source_choices[1]
-        if len(source_choices) > 1
-        else source_choices[0]
-        if source_choices
-        else mangadex_choices[0]
-        if mangadex_choices
-        else ""
+    anilist_result: ArtworkMetadata
+    kitsu_result: ArtworkMetadata
+    jikan_result = ArtworkMetadata()
+
+    metadata_results = await asyncio.gather(
+        search_anilist_artwork(title, source_url),
+        search_kitsu_artwork(title, source_url),
+        return_exceptions=True,
+    )
+    anilist_result = metadata_results[0] if isinstance(metadata_results[0], ArtworkMetadata) else ArtworkMetadata()
+    kitsu_result = metadata_results[1] if isinstance(metadata_results[1], ArtworkMetadata) else ArtworkMetadata()
+
+    poster_choices = merge_artwork_choices(
+        [source_cover],
+        anilist_result.poster_choices,
+        kitsu_result.poster_choices,
     )
 
-    return {
+    if len(poster_choices) < ARTWORK_MIN_POSTER_CHOICES:
+        try:
+            jikan_result = await search_jikan_artwork(
+                title,
+                source_url,
+                limit=max(ARTWORK_MIN_POSTER_CHOICES, 8),
+            )
+        except Exception:
+            jikan_result = ArtworkMetadata()
+        poster_choices = merge_artwork_choices(
+            [source_cover],
+            anilist_result.poster_choices,
+            kitsu_result.poster_choices,
+            jikan_result.poster_choices,
+        )
+
+    cover_image_url = preferred_artwork_url(
+        source_cover,
+        anilist_result.cover_image_url,
+        kitsu_result.cover_image_url,
+        jikan_result.cover_image_url,
+    )
+    hero_image_url = preferred_artwork_url(
+        anilist_result.hero_image_url,
+        kitsu_result.hero_image_url,
+        cover_image_url,
+        jikan_result.hero_image_url,
+    )
+
+    return set_cached_artwork(title, source_url, {
         "cover_image_url": cover_image_url,
         "hero_image_url": hero_image_url or cover_image_url,
         "poster_choices": poster_choices,
-    }
+    })
 
 
 async def search_supported_series(query: str, limit: int = 12) -> list[dict[str, object]]:
