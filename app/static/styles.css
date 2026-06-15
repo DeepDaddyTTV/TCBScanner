@@ -5838,9 +5838,9 @@ select,
 }
 
 .library-rail > .rail-scroll {
-  display: grid;
-  grid-template-rows: auto auto;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0;
   max-height: none;
   overflow: auto;
@@ -5848,9 +5848,8 @@ select,
 }
 
 .series-panel {
-  display: grid;
-  grid-template-rows: auto auto;
-  min-height: 0;
+  display: block;
+  min-height: auto;
   overflow: visible;
 }
 

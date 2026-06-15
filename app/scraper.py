@@ -389,7 +389,31 @@ def absolute_image_url(base_url: str, raw_url: str) -> str:
     return normalize_url(urljoin(base_url, raw_url))
 
 
+def is_generic_series_artwork_url(url: str) -> bool:
+    parsed = urlparse(url)
+    lowered_path = parsed.path.lower()
+    file_name = PurePosixPath(lowered_path).name
+    stem = PurePosixPath(file_name).stem.lower()
+
+    if lowered_path.endswith(".svg"):
+        return True
+
+    blocked_tokens = (
+        "logo",
+        "favicon",
+        "avatar",
+        "placeholder",
+        "default",
+        "sprite",
+        "site-icon",
+    )
+    return any(token in lowered_path or token in stem for token in blocked_tokens)
+
+
 async def extract_series_page_artwork(source_url: str) -> list[str]:
+    if detect_provider(source_url) == "tcb":
+        return []
+
     html = await fetch_html(source_url)
     soup = BeautifulSoup(html, "lxml")
     image_urls: list[str] = []
@@ -398,13 +422,17 @@ async def extract_series_page_artwork(source_url: str) -> list[str]:
         for node in soup.select(selector):
             value = str(node.get(attribute) or "").strip()
             if value:
-                image_urls.append(absolute_image_url(source_url, value))
+                resolved = absolute_image_url(source_url, value)
+                if resolved and not is_generic_series_artwork_url(resolved):
+                    image_urls.append(resolved)
 
     for selector in SERIES_ART_IMAGE_SELECTORS:
         for node in soup.select(selector):
             value = str(node.get("data-src") or node.get("src") or "").strip()
             if value:
-                image_urls.append(absolute_image_url(source_url, value))
+                resolved = absolute_image_url(source_url, value)
+                if resolved and not is_generic_series_artwork_url(resolved):
+                    image_urls.append(resolved)
 
     return dedupe_urls(image_urls)
 

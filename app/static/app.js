@@ -51,7 +51,7 @@ const CHAPTER_FILTERS = [
   },
 ];
 
-const ART_CACHE_KEY = "tcbscanner-jikan-art-v7";
+const ART_CACHE_KEY = "tcbscanner-jikan-art-v8";
 const ARTWORK_API_PATH = "/api/artwork";
 const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const MIN_POSTER_CHOICES = 5;
