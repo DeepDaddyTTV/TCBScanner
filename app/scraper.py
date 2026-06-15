@@ -253,6 +253,22 @@ def fetch_mangadex_search_with_requests(query: str, limit: int) -> dict[str, obj
     return response.json()
 
 
+def fetch_mangadex_covers_with_requests(manga_id: str, limit: int) -> dict[str, object]:
+    import requests
+
+    response = requests.get(
+        f"{MANGADEX_API_BASE}/cover",
+        params=[
+            ("manga[]", manga_id),
+            ("limit", limit),
+        ],
+        timeout=30,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def list_supported_sources() -> list[dict[str, object]]:
     return [
         {
@@ -302,33 +318,13 @@ def artwork_query_variants(title: str, source_url: str) -> list[str]:
     return [item for item in dict.fromkeys(variants) if item]
 
 
-def artwork_match_score(target: str, candidate: str) -> float:
-    target_key = normalize_artwork_key(target)
-    candidate_key = normalize_artwork_key(candidate)
-    if not target_key or not candidate_key:
-        return 0.0
-    target_words = [word for word in target_key.split() if word]
-    candidate_words = [word for word in candidate_key.split() if word]
-    if not target_words or not candidate_words:
-        return 0.0
-    target_set = set(target_words)
-    candidate_set = set(candidate_words)
-    overlap = len(target_set & candidate_set)
-    if not overlap:
-        return 0.0
-    coverage = overlap / len(target_set)
-    precision = overlap / len(candidate_set)
-    score = overlap * 20 + coverage * 100 + precision * 35
-    if candidate_key == target_key:
-        score += 180
-    elif candidate_key.startswith(target_key) or target_key.startswith(candidate_key):
-        score += 90
-    return score
-
-
-def is_confident_artwork_match(query: str, candidate_titles: list[str]) -> tuple[bool, float]:
-    best = max((artwork_match_score(query, candidate) for candidate in candidate_titles), default=0.0)
-    return best >= 120.0, best
+def is_exact_artwork_match(query_variants: set[str], candidate_titles: list[str]) -> bool:
+    candidate_keys = {
+        normalize_artwork_key(candidate)
+        for candidate in candidate_titles
+        if normalize_artwork_key(candidate)
+    }
+    return bool(query_variants & candidate_keys)
 
 
 def mangadex_title_variants(attributes: dict[str, object]) -> list[str]:
@@ -344,16 +340,47 @@ def mangadex_title_variants(attributes: dict[str, object]) -> list[str]:
     return list(dict.fromkeys(titles))
 
 
-def mangadex_cover_filename(relationships: list[dict[str, object]]) -> str:
-    for relationship in relationships:
-        if relationship.get("type") != "cover_art":
+def mangadex_cover_sort_key(cover: dict[str, object]) -> tuple[int, int, Decimal, str, str]:
+    raw_volume = str(cover.get("volume") or "").strip()
+    locale = str(cover.get("locale") or "").strip().lower()
+    try:
+        volume_value = Decimal(raw_volume) if raw_volume else Decimal("9999")
+    except InvalidOperation:
+        volume_value = Decimal("9999")
+    locale_rank = {"en": 0, "ja": 1, "ko": 2, "es": 3}.get(locale, 9)
+    volume_rank = 0 if raw_volume == "1" else 1
+    return (
+        volume_rank,
+        locale_rank,
+        volume_value,
+        locale,
+        str(cover.get("file_name") or ""),
+    )
+
+
+def mangadex_cover_urls(manga_id: str, payload: dict[str, object], limit: int) -> list[str]:
+    entries: list[dict[str, object]] = []
+    for item in payload.get("data", []):
+        if not isinstance(item, dict):
             continue
-        attributes = relationship.get("attributes")
-        if isinstance(attributes, dict):
-            file_name = str(attributes.get("fileName") or "").strip()
-            if file_name:
-                return file_name
-    return ""
+        attributes = item.get("attributes")
+        if not isinstance(attributes, dict):
+            continue
+        file_name = str(attributes.get("fileName") or "").strip()
+        if not file_name:
+            continue
+        entries.append(
+            {
+                "file_name": file_name,
+                "locale": str(attributes.get("locale") or "").strip(),
+                "volume": str(attributes.get("volume") or "").strip(),
+            }
+        )
+    entries.sort(key=mangadex_cover_sort_key)
+    return [
+        f"{MANGADEX_COVERS_BASE}/{manga_id}/{entry['file_name']}.512.jpg"
+        for entry in entries[:limit]
+    ]
 
 
 def absolute_image_url(base_url: str, raw_url: str) -> str:
@@ -384,12 +411,11 @@ async def extract_series_page_artwork(source_url: str) -> list[str]:
 
 async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 12) -> list[str]:
     queries = artwork_query_variants(title, source_url)
-    if not queries:
+    query_variants = set(queries)
+    if not query_variants:
         return []
 
-    ranked: list[tuple[float, str]] = []
-    seen_urls: set[str] = set()
-
+    matched_manga_id = ""
     for query in queries:
         payload = await asyncio.to_thread(
             fetch_mangadex_search_with_requests,
@@ -403,24 +429,24 @@ async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 12
             if not isinstance(attributes, dict):
                 continue
             candidate_titles = mangadex_title_variants(attributes)
-            confident, score = is_confident_artwork_match(query, candidate_titles)
-            if not confident:
+            if not is_exact_artwork_match(query_variants, candidate_titles):
                 continue
-            relationships = item.get("relationships")
-            if not isinstance(relationships, list):
-                continue
-            file_name = mangadex_cover_filename(relationships)
             manga_id = str(item.get("id") or "").strip()
-            if not manga_id or not file_name:
-                continue
-            cover_url = f"{MANGADEX_COVERS_BASE}/{manga_id}/{file_name}.512.jpg"
-            if cover_url in seen_urls:
-                continue
-            seen_urls.add(cover_url)
-            ranked.append((score, cover_url))
+            if manga_id:
+                matched_manga_id = manga_id
+                break
+        if matched_manga_id:
+            break
 
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [url for _, url in ranked]
+    if not matched_manga_id:
+        return []
+
+    covers_payload = await asyncio.to_thread(
+        fetch_mangadex_covers_with_requests,
+        matched_manga_id,
+        limit,
+    )
+    return dedupe_urls(mangadex_cover_urls(matched_manga_id, covers_payload, limit))
 
 
 async def resolve_series_artwork(title: str, source_url: str) -> dict[str, object]:

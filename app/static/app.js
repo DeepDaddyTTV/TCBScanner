@@ -51,7 +51,7 @@ const CHAPTER_FILTERS = [
   },
 ];
 
-const ART_CACHE_KEY = "tcbscanner-jikan-art-v6";
+const ART_CACHE_KEY = "tcbscanner-jikan-art-v7";
 const ARTWORK_API_PATH = "/api/artwork";
 const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const MIN_POSTER_CHOICES = 5;
@@ -214,6 +214,7 @@ function buildArtEntry(payload, existing = null) {
   const heroImageUrl = String(payload?.hero_image_url || coverImageUrl || existing?.hero_image_url || "").trim() || coverImageUrl;
   const resolvedChoices = Array.isArray(payload?.poster_choices) ? payload.poster_choices : [];
   const existingChoices = Array.isArray(existing?.poster_choices) ? existing.poster_choices : [];
+  const hasFreshChoices = Boolean(coverImageUrl || heroImageUrl || resolvedChoices.length);
   return {
     cached_at: Date.now(),
     mal_id: null,
@@ -223,12 +224,19 @@ function buildArtEntry(payload, existing = null) {
     hero_image_url: heroImageUrl,
     pictures_hydrated: true,
     lookup_complete: true,
-    poster_choices: dedupePosterChoices([
-      coverImageUrl,
-      heroImageUrl,
-      ...resolvedChoices,
-      ...existingChoices,
-    ]),
+    poster_choices: dedupePosterChoices(
+      hasFreshChoices
+        ? [
+            coverImageUrl,
+            heroImageUrl,
+            ...resolvedChoices,
+          ]
+        : [
+            coverImageUrl,
+            heroImageUrl,
+            ...existingChoices,
+          ],
+    ),
   };
 }
 
