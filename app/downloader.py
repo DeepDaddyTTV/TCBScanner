@@ -18,16 +18,18 @@ class MangaDownloader:
         self,
         store: Store,
         *,
-        library_dir: Path,
+        library_roots: list[Path],
         work_dir: Path,
         request_delay: float,
     ) -> None:
         self.store = store
-        self.library_dir = library_dir
+        self.library_roots = [path.resolve() for path in library_roots if str(path).strip()]
+        self.primary_library_dir = self.library_roots[0] if self.library_roots else Path("/library").resolve()
         self.work_dir = work_dir
         self.request_delay = request_delay
         self._download_lock = asyncio.Lock()
-        self.library_dir.mkdir(parents=True, exist_ok=True)
+        for library_root in self.library_roots or [self.primary_library_dir]:
+            library_root.mkdir(parents=True, exist_ok=True)
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
     async def check_series(self, series_id: int, *, force_download: bool = True) -> None:
@@ -166,7 +168,7 @@ class MangaDownloader:
         page_count: int,
     ) -> Path:
         folder = resolve_library_folder(
-            self.library_dir,
+            self.library_roots or [self.primary_library_dir],
             str(series.get("folder") or ""),
             str(series.get("title") or "Manga"),
         )
@@ -228,15 +230,26 @@ def padded_chapter_number(chapter_number: str) -> str:
     return whole.zfill(4) + (decimal or "")
 
 
-def resolve_library_folder(library_dir: Path, folder: str, title: str) -> Path:
-    root = library_dir.resolve()
-    raw_parts = re.split(r"[\\/]+", folder.strip()) if folder.strip() else [title]
+def resolve_library_folder(library_roots: list[Path], folder: str, title: str) -> Path:
+    roots = [root.resolve() for root in library_roots if str(root).strip()]
+    primary_root = roots[0] if roots else Path("/library").resolve()
+    raw_folder = str(folder or "").strip()
+
+    if raw_folder.startswith("/"):
+        candidate = Path(raw_folder).resolve()
+        for root in roots or [primary_root]:
+            if candidate == root or root in candidate.parents:
+                return candidate
+        raise ValueError("Folder must stay inside one of the configured library roots.")
+
+    raw_parts = re.split(r"[\\/]+", raw_folder) if raw_folder else [title]
     parts = [safe_component(part, "") for part in raw_parts]
     clean_parts = [part for part in parts if part and part not in {".", ".."}]
     if not clean_parts:
         clean_parts = [safe_component(title, "Manga")]
-    destination = root.joinpath(*clean_parts).resolve()
-    if destination != root and root not in destination.parents:
+
+    destination = primary_root.joinpath(*clean_parts).resolve()
+    if destination != primary_root and primary_root not in destination.parents:
         raise ValueError("Folder must stay inside the configured library directory.")
     return destination
 

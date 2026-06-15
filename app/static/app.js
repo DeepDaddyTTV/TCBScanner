@@ -58,6 +58,12 @@ const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 const state = {
   series: [],
   events: [],
+  queue: {
+    downloading: [],
+    pending: [],
+    downloading_count: 0,
+    pending_count: 0,
+  },
   meta: {
     version: "0.2.0",
     version_label: "0.2.0",
@@ -70,6 +76,9 @@ const state = {
   settings: {
     default_naming_format: "{ChapterFullTitle}",
     variables: [],
+    kavita_url: "",
+    komga_url: "",
+    library_roots: [],
   },
   chapterFilter: "all",
   chapterBulkOpen: false,
@@ -96,6 +105,10 @@ const state = {
   editDraft: null,
   editDraftSeriesId: null,
   editDraftDirty: false,
+  activityDrawerOpen: false,
+  posterPickerSeriesId: null,
+  posterChoices: [],
+  posterChoicesLoading: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -113,6 +126,7 @@ const themeLabels = {
 const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 let noticeTimer = null;
 let artQueue = Promise.resolve();
+let preservedFocus = null;
 state.seriesArt = loadArtCache();
 
 async function api(path, options = {}) {
@@ -192,7 +206,12 @@ function selectArtworkUrl(entry, preferred = "hero") {
 }
 
 function getSeriesCoverUrl(series, art) {
-  return selectArtworkUrl(art, "cover") || getMockupCoverUrl(series) || "";
+  return (
+    String(series?.poster_image_url || "").trim() ||
+    selectArtworkUrl(art, "cover") ||
+    getMockupCoverUrl(series) ||
+    ""
+  );
 }
 
 function getMockupCoverUrl(series) {
@@ -247,20 +266,23 @@ function buildArtEntry(candidate, existing = null) {
   const images = candidate?.images || {};
   const webp = images.webp || {};
   const jpg = images.jpg || {};
+  const coverImageUrl =
+    webp.large_image_url ||
+    webp.image_url ||
+    jpg.large_image_url ||
+    jpg.image_url ||
+    existing?.cover_image_url ||
+    "";
+  const existingChoices = Array.isArray(existing?.poster_choices) ? existing.poster_choices : [];
   return {
     cached_at: Date.now(),
     mal_id: candidate?.mal_id || existing?.mal_id || null,
     title: candidate?.title || existing?.title || "",
     mal_url: candidate?.url || existing?.mal_url || "",
-    cover_image_url:
-      webp.large_image_url ||
-      webp.image_url ||
-      jpg.large_image_url ||
-      jpg.image_url ||
-      existing?.cover_image_url ||
-      "",
+    cover_image_url: coverImageUrl,
     hero_image_url: existing?.hero_image_url || "",
     pictures_hydrated: existing?.pictures_hydrated || false,
+    poster_choices: dedupePosterChoices([coverImageUrl, ...existingChoices]),
   };
 }
 
@@ -273,6 +295,10 @@ function getPictureUrl(picture) {
     picture?.jpg?.image_url ||
     ""
   );
+}
+
+function dedupePosterChoices(choices) {
+  return [...new Set((choices || []).map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
 async function fetchSeriesArtwork(series) {
@@ -320,6 +346,12 @@ async function hydrateHeroArtwork(cacheKey, malId) {
       cover_image_url: coverUrl || current.cover_image_url,
       hero_image_url: heroUrl || current.cover_image_url,
       pictures_hydrated: true,
+      poster_choices: dedupePosterChoices([
+        current.cover_image_url,
+        coverUrl,
+        heroUrl,
+        ...pictureUrls,
+      ]),
     };
     persistArtCache();
     renderArtwork();
@@ -348,6 +380,35 @@ async function queueArtworkHydration(seriesList = state.series) {
         state.artRequests.delete(cacheKey);
       }
     });
+  }
+}
+
+async function openPosterPicker(selected) {
+  if (!selected) return;
+  state.posterPickerSeriesId = selected.id;
+  state.posterChoicesLoading = true;
+  state.posterChoices = [];
+  renderSidebar();
+  try {
+    const cacheKey = normalizeSeriesKey(selected.title);
+    let art = getArtworkForSeries(selected);
+    if (!art) {
+      art = await fetchSeriesArtwork(selected);
+    }
+    if (art?.mal_id && !art?.pictures_hydrated) {
+      art = await hydrateHeroArtwork(cacheKey, art.mal_id);
+    }
+    const latest = art || getArtworkForSeries(selected);
+    state.posterChoices = dedupePosterChoices([
+      latest?.cover_image_url,
+      ...(latest?.poster_choices || []),
+      getMockupCoverUrl(selected),
+    ]);
+  } catch (error) {
+    console.warn(error);
+  } finally {
+    state.posterChoicesLoading = false;
+    renderSidebar();
   }
 }
 
@@ -450,6 +511,7 @@ function buildSeriesFromDraft(draft, fallback = {}) {
     folder: String(readDraftValue(draft, "folder", fallback.folder || fallback.title || "")),
     check_interval_minutes: Math.max(30, Math.round(intervalHours * 60)),
     naming_format: String(readDraftValue(draft, "naming_format", fallback.naming_format || "")),
+    poster_image_url: String(readDraftValue(draft, "poster_image_url", fallback.poster_image_url || "")),
     enabled: Boolean(readDraftValue(draft, "enabled", fallback.enabled)),
     backfill_existing: Boolean(readDraftValue(draft, "backfill_existing", fallback.backfill_existing)),
   };
@@ -599,17 +661,19 @@ function compareSeries(left, right) {
 }
 
 async function fetchCoreState() {
-  const [settingsData, seriesData, eventsData, metaData] = await Promise.all([
+  const [settingsData, seriesData, eventsData, metaData, queueData] = await Promise.all([
     api("/api/settings"),
     api("/api/series"),
     api("/api/events"),
     api("/api/meta"),
+    api("/api/queue"),
   ]);
 
   state.settings = settingsData;
   state.series = [...seriesData.series].sort(compareSeries);
   state.events = eventsData.events;
   state.meta = metaData;
+  state.queue = queueData;
   syncSelectedSeries();
 
   if (state.selectedSeriesId) {
@@ -661,17 +725,21 @@ async function loadChaptersForSeries(seriesId) {
 }
 
 function renderAll() {
+  preservedFocus = captureFocusState();
   renderBrandPanel();
   renderSettings();
   renderOverview();
   renderSeries();
   renderSeriesFocus();
   renderSidebar();
+  renderQueueDrawer();
   syncLibrarySearchInput();
   renderFilters();
   renderChapters();
   renderEvents();
   renderShellMeta();
+  restoreFocusState(preservedFocus);
+  preservedFocus = null;
 }
 
 function renderBrandPanel() {
@@ -687,15 +755,23 @@ function renderSettings() {
   if (optionsInput && document.activeElement !== optionsInput) {
     optionsInput.value = state.settings.default_naming_format || "{ChapterFullTitle}";
   }
+  const kavitaInput = optionsForm?.elements.kavita_url;
+  if (kavitaInput && document.activeElement !== kavitaInput) {
+    kavitaInput.value = state.settings.kavita_url || "";
+  }
+  const komgaInput = optionsForm?.elements.komga_url;
+  if (komgaInput && document.activeElement !== komgaInput) {
+    komgaInput.value = state.settings.komga_url || "";
+  }
 
   const variables = $("#namingVariables");
   const variableMarkup = (state.settings.variables || [])
     .map(
       (variable) => `
-        <article class="variable-item">
+        <button class="variable-item" type="button" data-insert-variable="${escapeHtml(formatVariableToken(variable.name))}" data-variable-context="settings">
           <code>{${escapeHtml(variable.name)}}</code>
           <span>${escapeHtml(variable.description)}</span>
-        </article>
+        </button>
       `,
     )
     .join("");
@@ -750,7 +826,7 @@ function renderOverview() {
       summary.monitored += series.enabled ? 1 : 0;
       summary.indexed += Number(series.chapter_count || 0);
       summary.downloaded += Number(series.downloaded_count || 0);
-      summary.queued += Number(series.pending_count || 0);
+      summary.queued += Number(series.pending_count || 0) + Number(series.downloading_count || 0);
       summary.failed += Number(series.failed_count || 0);
       return summary;
     },
@@ -896,7 +972,7 @@ function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
         <div class="series-stats">
           ${seriesInlineStat(series.chapter_count, "found")}
           ${seriesInlineStat(series.downloaded_count, "downloaded")}
-          ${seriesInlineStat(series.pending_count, "queued")}
+          ${seriesInlineStat(Number(series.pending_count || 0) + Number(series.downloading_count || 0), "queued")}
           ${seriesInlineStat(series.failed_count, "failed")}
         </div>
 
@@ -1163,6 +1239,7 @@ function renderDiscoverSidebar() {
 }
 
 function renderChaptersSidebar(selected) {
+  const downloadingNow = state.chapters.filter((chapter) => chapter.status === "downloading");
   return `
     <div class="panel-heading">
       <div>
@@ -1178,8 +1255,28 @@ function renderChaptersSidebar(selected) {
       <div class="sidebar-stat-grid">
         ${miniStat(selected.chapter_count, "Found")}
         ${miniStat(selected.downloaded_count, "Downloaded")}
-        ${miniStat(selected.pending_count, "Queued")}
+        ${miniStat(Number(selected.pending_count || 0) + Number(selected.downloading_count || 0), "Queued")}
         ${miniStat(selected.failed_count, "Failed")}
+      </div>
+      <div class="sidebar-subsection">
+        <div class="sidebar-subsection-head">
+          <strong>Currently downloading</strong>
+          <span>${downloadingNow.length}</span>
+        </div>
+        ${
+          downloadingNow.length
+            ? downloadingNow
+                .map(
+                  (chapter) => `
+                    <article class="sidebar-history-row tone-downloaded">
+                      <strong>${escapeHtml(chapter.display_title)}</strong>
+                      <span>${escapeHtml(chapter.page_count ? `${chapter.page_count} pages staged` : "Packaging pages now")}</span>
+                    </article>
+                  `,
+                )
+                .join("")
+            : `<div class="inline-alert compact"><strong>No active download</strong><p>This series is not downloading a chapter right now.</p></div>`
+        }
       </div>
       <label class="toggle-line">
         <input type="checkbox" data-sidebar-monitor="true" ${selected.enabled ? "checked" : ""} />
@@ -1193,6 +1290,10 @@ function renderChaptersSidebar(selected) {
         <button class="small-action" type="button" data-sidebar-action="download">
           ${icons.download}
           <span>Queue missing</span>
+        </button>
+        <button class="small-action" type="button" data-sidebar-action="queue-failed">
+          ${icons.retry}
+          <span>Queue failed</span>
         </button>
         <button class="small-action danger-action" type="button" data-sidebar-action="delete">
           ${icons.trash}
@@ -1214,6 +1315,7 @@ function renderDetailsSidebar(selected) {
         <h2>Series details</h2>
         <p>The selected title's current source, cadence, folder, and naming summary.</p>
       </div>
+      <button class="small-action compact-action" type="button" data-sidebar-switch="settings">Edit</button>
     </div>
     <div class="sidebar-detail-list">
       ${sidebarDetailRow("Library title", selected.title)}
@@ -1310,6 +1412,7 @@ function renderFilesSidebar(selected) {
                         ${icons.folder}
                         <span>Open CBZ</span>
                       </a>
+                      ${renderReaderButtons(selected, chapter)}
                     </div>
                   </article>
                 `,
@@ -1326,15 +1429,96 @@ function renderFilesSidebar(selected) {
   `;
 }
 
+function buildReaderUrl(template, series, chapter) {
+  const raw = String(template || "").trim();
+  if (!raw) return "";
+  return raw
+    .replaceAll("{series}", encodeURIComponent(series?.title || ""))
+    .replaceAll("{title}", encodeURIComponent(series?.title || ""))
+    .replaceAll("{chapter}", encodeURIComponent(chapter?.display_title || chapter?.chapter_key || ""))
+    .replaceAll("{file}", encodeURIComponent(fileNameFromPath(chapter?.cbz_path || "")));
+}
+
+function renderReaderButtons(selected, chapter) {
+  const links = [
+    ["Kavita", state.settings.kavita_url],
+    ["Komga", state.settings.komga_url],
+  ]
+    .map(([label, template]) => [label, buildReaderUrl(template, selected, chapter)])
+    .filter(([, url]) => url);
+
+  return links
+    .map(
+      ([label, url]) => `
+        <a class="small-action tertiary-action" href="${escapeHtml(url)}" target="_blank" rel="noreferrer">
+          <span>Open in ${escapeHtml(label)}</span>
+        </a>
+      `,
+    )
+    .join("");
+}
+
+function renderPosterPicker(selected) {
+  const open = state.posterPickerSeriesId === selected.id;
+  const selectedUrl = getSeriesCoverUrl(selected, getArtworkForSeries(selected));
+  return `
+    <section class="settings-section poster-picker-section">
+      <div class="settings-section-heading">
+        <div>
+          <h3>Poster artwork</h3>
+          <p>Pick a different cover for this series from the available artwork we found.</p>
+        </div>
+        <button class="small-action compact-action" type="button" data-sidebar-action="toggle-poster-picker">
+          <span>${open ? "Hide posters" : "Edit poster"}</span>
+        </button>
+      </div>
+      <div class="poster-picker-current">
+        ${
+          selectedUrl
+            ? `<img src="${escapeHtml(selectedUrl)}" alt="" loading="lazy" />`
+            : `<div class="series-mark">${escapeHtml(seriesMark(selected.title))}</div>`
+        }
+      </div>
+      ${
+        open
+          ? `
+            <div class="poster-picker-grid">
+              <button class="poster-choice${!selected.poster_image_url ? " active" : ""}" type="button" data-poster-url="">
+                <span>Auto</span>
+              </button>
+              ${
+                state.posterChoicesLoading
+                  ? `<div class="inline-alert compact"><strong>Loading posters…</strong><p>Pulling available cover art for this series.</p></div>`
+                  : state.posterChoices
+                      .map(
+                        (url) => `
+                          <button class="poster-choice${selected.poster_image_url === url ? " active" : ""}" type="button" data-poster-url="${escapeHtml(url)}">
+                            <img src="${escapeHtml(url)}" alt="" loading="lazy" />
+                          </button>
+                        `,
+                      )
+                      .join("")
+              }
+            </div>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
 function renderSeriesSettingsSidebar(selected) {
-  return renderSeriesForm({
-    mode: "edit",
-    title: "Series settings",
-    description: `Change the tracked source, naming, monitoring cadence, and archive behavior for ${selected.title}.`,
-    draft: state.editDraft || seriesToDraft(selected),
-    submitLabel: "Save series settings",
-    submitIcon: icons.check,
-  });
+  return `
+    ${renderSeriesForm({
+      mode: "edit",
+      title: "Series settings",
+      description: `Change the tracked source, naming, monitoring cadence, and archive behavior for ${selected.title}.`,
+      draft: state.editDraft || seriesToDraft(selected),
+      submitLabel: "Save series settings",
+      submitIcon: icons.check,
+    })}
+    ${renderPosterPicker(selected)}
+  `;
 }
 
 function renderSearchResults(hasQuery, hasResults, results) {
@@ -1409,6 +1593,7 @@ function renderSearchResults(hasQuery, hasResults, results) {
 
 function renderSeriesForm({ mode, title, description, draft, submitLabel, submitIcon }) {
   const safeDraft = draft || defaultSeriesDraft();
+  const namingPlaceholder = state.settings.default_naming_format || "{ChapterFullTitle}";
   return `
     <div class="panel-heading">
       <div>
@@ -1428,7 +1613,12 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
       </label>
       <label class="field-span">
         <span>Save Folder</span>
-        <input name="folder" type="text" value="${escapeHtml(safeDraft.folder)}" placeholder="D:\\Manga\\My Hero Academia" />
+        <span class="select-shell">
+          <select name="folder">
+            ${renderFolderOptions(safeDraft.folder, safeDraft.title)}
+          </select>
+          <span class="select-caret" aria-hidden="true"></span>
+        </span>
       </label>
       <label class="field-span">
         <span>Check interval</span>
@@ -1445,11 +1635,11 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
           name="naming_format"
           type="text"
           value="${escapeHtml(safeDraft.naming_format)}"
-          placeholder="{title} - c{chapter} - {title} [{scanlators}].cbz"
+          placeholder="${escapeHtml(namingPlaceholder)}"
         />
       </label>
       <div class="variable-list compact field-span">
-        ${renderCompactVariableTokens()}
+        ${renderCompactVariableTokens("series")}
       </div>
       <label class="toggle-line">
         <input name="backfill_existing" type="checkbox" ${safeDraft.backfill_existing ? "checked" : ""} />
@@ -1467,13 +1657,13 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
   `;
 }
 
-function renderCompactVariableTokens() {
+function renderCompactVariableTokens(context = "series") {
   return (state.settings.variables || [])
     .map(
       (variable) => `
-        <article class="variable-item compact">
+        <button class="variable-item compact" type="button" data-insert-variable="${escapeHtml(formatVariableToken(variable.name))}" data-variable-context="${escapeHtml(context)}">
           <code>${escapeHtml(formatVariableToken(variable.name))}</code>
-        </article>
+        </button>
       `,
     )
     .join("");
@@ -1497,6 +1687,53 @@ function renderIntervalOptions(selectedValue) {
         `<option value="${value}" ${String(selectedValue) === String(value) ? "selected" : ""}>${label}</option>`,
     )
     .join("");
+}
+
+function renderFolderOptions(selectedFolder, title) {
+  const currentTitle = String(title || "").trim() || "Library Title";
+  const roots = Array.isArray(state.settings.library_roots) ? state.settings.library_roots : [];
+  const options = roots.length ? roots.map((root) => buildFolderFromRoot(root, currentTitle)) : [currentTitle];
+  let selected = String(selectedFolder || "").trim();
+  if (roots.length && selected && !/[\\/]/.test(selected)) {
+    selected = buildFolderFromRoot(roots[0], selected);
+  } else if (roots.length && !selected) {
+    selected = buildFolderFromRoot(roots[0], currentTitle);
+  }
+  const uniqueOptions = [...new Set([...options, ...(selected ? [selected] : [])])];
+  return uniqueOptions
+    .map((option) => {
+      const isSelected = option === (selected || options[0]);
+      return `<option value="${escapeHtml(option)}" ${isSelected ? "selected" : ""}>${escapeHtml(option)}</option>`;
+    })
+    .join("");
+}
+
+function buildFolderFromRoot(root, title) {
+  const cleanRoot = String(root || "").trim().replace(/[\\/]+$/, "");
+  const cleanTitle = String(title || "").trim() || "Library Title";
+  if (!cleanRoot) return cleanTitle;
+  return `${cleanRoot}/${cleanTitle}`.replace(/\/{2,}/g, "/");
+}
+
+function folderRootForValue(value) {
+  const folder = String(value || "").trim();
+  const roots = Array.isArray(state.settings.library_roots) ? state.settings.library_roots : [];
+  return roots.find((root) => folder === root || folder.startsWith(`${String(root).replace(/[\\/]+$/, "")}/`)) || "";
+}
+
+function suggestedFolderValue(currentValue, title) {
+  const root = folderRootForValue(currentValue) || String((state.settings.library_roots || [])[0] || "");
+  return root ? buildFolderFromRoot(root, title) : String(title || "").trim();
+}
+
+function updateFolderSelectOptions(form, title, { preserveRoot = true } = {}) {
+  const select = form?.elements?.folder;
+  if (!(select instanceof HTMLSelectElement)) return;
+  const nextTitle = String(title || "").trim() || "Library Title";
+  const currentValue = String(select.value || "");
+  const nextValue = preserveRoot ? suggestedFolderValue(currentValue, nextTitle) : currentValue;
+  select.innerHTML = renderFolderOptions(nextValue, nextTitle);
+  select.value = nextValue || select.value;
 }
 
 function sidebarDetailRow(label, value) {
@@ -1531,20 +1768,7 @@ function getNamingPreview(series) {
 }
 
 function formatVariableToken(name) {
-  const mapping = {
-    ChapterFullTitle: "{title}",
-    ChapterNumber: "{chapter}",
-    ChapterNumberPadded: "{chapter.pad}",
-    ChapterTitle: "{chapter.title}",
-    ChapterName: "{chapter.title}",
-    SeriesName: "{series}",
-    SeriesTitle: "{series}",
-    PageCount: "{pages}",
-    Scanlator: "{scanlators}",
-    Group: "{group}",
-    Date: "{date}",
-  };
-  return mapping[name] || `{${name}}`;
+  return `{${name}}`;
 }
 
 function formatSourceDisplay(url) {
@@ -1565,6 +1789,9 @@ function formatFolderDisplay(folder) {
   const value = String(folder || "").trim();
   if (!value) return "D:\\Manga\\Series";
   if (/[\\/]/.test(value)) return value;
+  if (Array.isArray(state.settings.library_roots) && state.settings.library_roots.length) {
+    return buildFolderFromRoot(state.settings.library_roots[0], value);
+  }
   return `D:\\Manga\\${value}`;
 }
 
@@ -1795,6 +2022,86 @@ function renderEvents() {
     .join("");
 }
 
+function renderQueueDrawer() {
+  const drawer = $("#activityDrawer");
+  const summary = $("#statusSecondary");
+  const title = $("#statusPrimary");
+  if (!drawer || !summary || !title) return;
+
+  const downloading = Array.isArray(state.queue.downloading) ? state.queue.downloading : [];
+  const pending = Array.isArray(state.queue.pending) ? state.queue.pending : [];
+  const totalActivity = downloading.length + pending.length;
+
+  title.textContent = "Activity";
+  summary.textContent = totalActivity
+    ? `${downloading.length} downloading · ${pending.length} pending`
+    : getNextScanLabel();
+  drawer.classList.toggle("hidden", !state.activityDrawerOpen);
+
+  const downloadingMarkup = downloading.length
+    ? downloading
+        .map(
+          (chapter) => `
+            <article class="activity-drawer-row tone-downloading">
+              <strong>${escapeHtml(chapter.series_title || "Unknown series")}</strong>
+              <span>${escapeHtml(chapter.display_title || chapter.chapter_key || "Downloading chapter")}</span>
+            </article>
+          `,
+        )
+        .join("")
+    : `<div class="empty-state"><strong>No downloads in progress</strong><p>Queued downloads will appear here while packaging is active.</p></div>`;
+
+  const pendingMarkup = pending.length
+    ? pending
+        .slice(0, 30)
+        .map(
+          (chapter) => `
+            <article class="activity-drawer-row tone-pending">
+              <strong>${escapeHtml(chapter.series_title || "Unknown series")}</strong>
+              <span>${escapeHtml(chapter.display_title || chapter.chapter_key || "Queued chapter")}</span>
+            </article>
+          `,
+        )
+        .join("")
+    : `<div class="empty-state"><strong>No pending chapters</strong><p>The queue is clear right now.</p></div>`;
+
+  drawer.innerHTML = `
+    <div class="activity-drawer-inner">
+      <div class="activity-drawer-heading">
+        <div>
+          <h2>Activity</h2>
+          <p>Currently downloading and pending chapters across the scanner.</p>
+        </div>
+        <button class="settings-drawer-close" id="activityDrawerClose" type="button" aria-label="Close activity drawer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+        </button>
+      </div>
+      <div class="activity-drawer-columns">
+        <section class="activity-drawer-section">
+          <div class="activity-drawer-section-head">
+            <strong>Downloading</strong>
+            <span>${downloading.length}</span>
+          </div>
+          <div class="activity-drawer-list">${downloadingMarkup}</div>
+        </section>
+        <section class="activity-drawer-section">
+          <div class="activity-drawer-section-head">
+            <strong>Pending</strong>
+            <span>${pending.length}</span>
+          </div>
+          <div class="activity-drawer-list">${pendingMarkup}</div>
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function toggleActivityDrawer(forceOpen) {
+  state.activityDrawerOpen =
+    typeof forceOpen === "boolean" ? forceOpen : !state.activityDrawerOpen;
+  renderQueueDrawer();
+}
+
 function renderSelectionTools() {
   const tools = $("#chapterTools");
   const bulkToggle = $("#bulkActionsToggle");
@@ -1924,7 +2231,10 @@ function renderShellMeta() {
   }
 
   const monitored = state.series.filter((series) => series.enabled).length;
-  const queued = state.series.reduce((sum, series) => sum + Number(series.pending_count || 0), 0);
+  const queued = state.series.reduce(
+    (sum, series) => sum + Number(series.pending_count || 0) + Number(series.downloading_count || 0),
+    0,
+  );
   const failed = state.series.reduce((sum, series) => sum + Number(series.failed_count || 0), 0);
 
   if (!state.series.length) {
@@ -2058,9 +2368,11 @@ function renderStatusStrip() {
   const secondary = $("#statusSecondary");
   if (!primary || !version || !secondary) return;
 
-  primary.textContent = state.isRefreshing ? "Refreshing scanner" : "Engine idle";
   version.textContent = `Version ${state.meta.version_label || "0.2.0"}`;
-  secondary.textContent = getNextScanLabel();
+  primary.textContent = "Activity";
+  secondary.textContent = state.isRefreshing
+    ? "Refreshing scanner"
+    : `${Number(state.queue.downloading_count || 0)} downloading · ${Number(state.queue.pending_count || 0)} pending`;
 }
 
 function initTheme() {
@@ -2176,6 +2488,35 @@ function getHostLabel(url) {
   }
 }
 
+function guessTitleFromSeriesUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname
+      .split("/")
+      .map((part) => decodeURIComponent(part).trim())
+      .filter(Boolean);
+    if (!parts.length) return "";
+    let slug = parts[parts.length - 1];
+    if (/^(chapter|ch)[-_ ]*\d/i.test(slug) && parts.length > 1) {
+      slug = parts[parts.length - 2];
+    }
+    if (parts[0]?.toLowerCase() === "webtoon" && parts[1]) {
+      slug = parts[1];
+    }
+    slug = slug
+      .replace(/(?:^|[-_ ])(?:chapter|ch)[-_ ]*\d.*$/i, "")
+      .replace(/\.(html|php)$/i, "");
+    return slug
+      .split(/[-_]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
 function fileNameFromPath(value) {
   return String(value || "").split(/[\\/]/).filter(Boolean).pop() || value;
 }
@@ -2210,8 +2551,8 @@ function getNextScanLabel() {
     }
     const lastChecked = new Date(series.last_checked_at);
     if (Number.isNaN(lastChecked.getTime())) continue;
-    const dueAt =
-      lastChecked.getTime() + Number(series.check_interval_minutes || 0) * 60 * 1000;
+    const intervalMs = Math.max(1, Number(series.check_interval_minutes || 0)) * 60 * 1000;
+    const dueAt = (Math.floor(lastChecked.getTime() / intervalMs) + 1) * intervalMs;
     if (soonest === null || dueAt < soonest) {
       soonest = dueAt;
     }
@@ -2369,6 +2710,63 @@ function handleError(error, prefix = "Something went wrong.") {
   setNotice(`${prefix} ${suffix}`.trim(), "error");
 }
 
+function captureFocusState() {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement)) {
+    return null;
+  }
+  const selector = active.id
+    ? `#${active.id}`
+    : active.name
+      ? `${active.form?.id ? `#${active.form.id} ` : ""}[name="${CSS.escape(active.name)}"]`
+      : null;
+  if (!selector) return null;
+  return {
+    selector,
+    start: typeof active.selectionStart === "number" ? active.selectionStart : null,
+    end: typeof active.selectionEnd === "number" ? active.selectionEnd : null,
+  };
+}
+
+function restoreFocusState(snapshot) {
+  if (!snapshot || document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
+    return;
+  }
+  const target = document.querySelector(snapshot.selector);
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
+    return;
+  }
+  target.focus({ preventScroll: true });
+  if (
+    typeof snapshot.start === "number" &&
+    typeof snapshot.end === "number" &&
+    typeof target.setSelectionRange === "function"
+  ) {
+    target.setSelectionRange(snapshot.start, snapshot.end);
+  }
+}
+
+function insertTextAtCursor(element, text) {
+  if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return;
+  const start = typeof element.selectionStart === "number" ? element.selectionStart : element.value.length;
+  const end = typeof element.selectionEnd === "number" ? element.selectionEnd : start;
+  const before = element.value.slice(0, start);
+  const after = element.value.slice(end);
+  element.value = `${before}${text}${after}`;
+  const nextCursor = start + text.length;
+  element.focus();
+  element.setSelectionRange(nextCursor, nextCursor);
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function resolveVariableTarget(button) {
+  const context = button?.dataset.variableContext || "series";
+  if (context === "settings") {
+    return $("#optionsForm [name='default_naming_format']");
+  }
+  return $("#sidebarPanel #seriesForm [name='naming_format']");
+}
+
 function readSeriesFormPayload(form) {
   const formData = new FormData(form);
   return {
@@ -2507,11 +2905,12 @@ listen($("#optionsForm"), "submit", async (event) => {
     method: "POST",
     body: JSON.stringify({
       default_naming_format: String(form.get("default_naming_format") || "{ChapterFullTitle}"),
+      kavita_url: String(form.get("kavita_url") || "").trim(),
+      komga_url: String(form.get("komga_url") || "").trim(),
     }),
   });
   setNotice("Global naming defaults saved.", "success");
   await refreshAll({ quiet: true });
-  toggleOptionsPanel(false);
 });
 
 listen($("#exportLibraryButton"), "click", async () => {
@@ -2716,6 +3115,25 @@ $("#openAddSeriesButton").addEventListener("click", () => {
   }
 });
 
+$("#optionsForm").addEventListener("click", (event) => {
+  const variableButton = event.target.closest("[data-insert-variable]");
+  if (!variableButton) return;
+  const target = resolveVariableTarget(variableButton);
+  if (target) {
+    insertTextAtCursor(target, variableButton.dataset.insertVariable || "");
+  }
+});
+
+$("#statusPrimary").addEventListener("click", () => {
+  toggleActivityDrawer();
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("#activityDrawerClose")) {
+    toggleActivityDrawer(false);
+  }
+});
+
 listen($("#sidebarPanel"), "submit", async (event) => {
   const form = event.target.closest("#seriesForm, #sidebarSearchForm");
   if (!form) return;
@@ -2779,6 +3197,19 @@ listen($("#sidebarPanel"), "submit", async (event) => {
 listen($("#sidebarPanel"), "input", async (event) => {
   const form = event.target.closest("#seriesForm");
   if (!form) return;
+  const target = event.target;
+  if (target?.name === "source_url") {
+    const titleInput = form.elements.title;
+    if (titleInput && !String(titleInput.value || "").trim()) {
+      const guessed = guessTitleFromSeriesUrl(target.value);
+      if (guessed) {
+        titleInput.value = guessed;
+      }
+    }
+  }
+  if (target?.name === "source_url" || target?.name === "title") {
+    updateFolderSelectOptions(form, form.elements.title?.value || "");
+  }
   const mode = form.dataset.mode || "create";
   syncDraftFromPayload(normalizeSeriesPayload(readSeriesFormPayload(form)), mode);
   renderSeriesFocus();
@@ -2787,6 +3218,9 @@ listen($("#sidebarPanel"), "input", async (event) => {
 listen($("#sidebarPanel"), "change", async (event) => {
   const form = event.target.closest("#seriesForm");
   if (form) {
+    if (event.target?.name === "title" || event.target?.name === "folder") {
+      updateFolderSelectOptions(form, form.elements.title?.value || "");
+    }
     const mode = form.dataset.mode || "create";
     syncDraftFromPayload(normalizeSeriesPayload(readSeriesFormPayload(form)), mode);
     renderSeriesFocus();
@@ -2806,6 +3240,23 @@ listen($("#sidebarPanel"), "change", async (event) => {
 });
 
 listen($("#sidebarPanel"), "click", async (event) => {
+  const variableButton = event.target.closest("[data-insert-variable]");
+  if (variableButton) {
+    const target = resolveVariableTarget(variableButton);
+    if (target) {
+      insertTextAtCursor(target, variableButton.dataset.insertVariable || "");
+    }
+    return;
+  }
+
+  const switchButton = event.target.closest("[data-sidebar-switch]");
+  if (switchButton) {
+    const nextMode = switchButton.dataset.sidebarSwitch || "settings";
+    setSidebarMode(nextMode);
+    renderAll();
+    return;
+  }
+
   const selectExisting = event.target.closest("[data-sidebar-select-series]");
   if (selectExisting) {
     await selectSeries(Number(selectExisting.dataset.sidebarSelectSeries), "chapters");
@@ -2823,9 +3274,34 @@ listen($("#sidebarPanel"), "click", async (event) => {
   }
 
   const actionButton = event.target.closest("[data-sidebar-action]");
-  if (!actionButton) return;
   const selected = getSelectedSeries();
-  if (!selected) return;
+  if (actionButton?.dataset.sidebarAction === "toggle-poster-picker") {
+    if (!selected) return;
+    if (state.posterPickerSeriesId === selected.id) {
+      state.posterPickerSeriesId = null;
+      state.posterChoices = [];
+      state.posterChoicesLoading = false;
+      renderSidebar();
+    } else {
+      await openPosterPicker(selected);
+    }
+    return;
+  }
+
+  const posterButton = event.target.closest("[data-poster-url]");
+  if (posterButton) {
+    if (!selected) return;
+    await api(`/api/series/${selected.id}/poster`, {
+      method: "POST",
+      body: JSON.stringify({ poster_image_url: posterButton.dataset.posterUrl || null }),
+    });
+    setNotice("Series poster updated.", "success");
+    await refreshAll({ quiet: true });
+    await openPosterPicker(getSelectedSeries());
+    return;
+  }
+
+  if (!actionButton || !selected) return;
 
   if (actionButton.dataset.sidebarAction === "check") {
     await api(`/api/series/${selected.id}/check`, { method: "POST" });
@@ -2837,6 +3313,13 @@ listen($("#sidebarPanel"), "click", async (event) => {
   if (actionButton.dataset.sidebarAction === "download") {
     const result = await api(`/api/series/${selected.id}/download-missing`, { method: "POST" });
     setNotice(`Queued ${Number(result.queued || 0)} missing chapter${Number(result.queued || 0) === 1 ? "" : "s"}.`, "success");
+    await refreshAll({ quiet: true });
+    return;
+  }
+
+  if (actionButton.dataset.sidebarAction === "queue-failed") {
+    const result = await api(`/api/series/${selected.id}/queue-failed`, { method: "POST" });
+    setNotice(`Queued ${Number(result.queued || 0)} failed chapter${Number(result.queued || 0) === 1 ? "" : "s"}.`, "success");
     await refreshAll({ quiet: true });
     return;
   }

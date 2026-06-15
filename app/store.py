@@ -79,6 +79,7 @@ class Store:
                 """
             )
             self._ensure_column("series", "naming_format", "TEXT")
+            self._ensure_column("series", "poster_image_url", "TEXT")
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO settings (key, value)
@@ -107,9 +108,9 @@ class Store:
                 """
                 INSERT INTO series (
                     title, source_url, folder, check_interval_minutes,
-                    enabled, backfill_existing, initialized, created_at, naming_format
+                    enabled, backfill_existing, initialized, created_at, naming_format, poster_image_url
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
                     payload["title"],
@@ -120,6 +121,7 @@ class Store:
                     1 if payload.get("backfill_existing", False) else 0,
                     now,
                     payload.get("naming_format") or None,
+                    payload.get("poster_image_url") or None,
                 ),
             )
             series_id = int(cur.lastrowid)
@@ -137,7 +139,8 @@ class Store:
                     check_interval_minutes = ?,
                     enabled = ?,
                     backfill_existing = ?,
-                    naming_format = ?
+                    naming_format = ?,
+                    poster_image_url = ?
                 WHERE id = ?
                 """,
                 (
@@ -148,6 +151,7 @@ class Store:
                     1 if payload.get("enabled", True) else 0,
                     1 if payload.get("backfill_existing", False) else 0,
                     payload.get("naming_format") or None,
+                    payload.get("poster_image_url") or None,
                     series_id,
                 ),
             )
@@ -161,6 +165,7 @@ class Store:
                 SELECT
                     s.*,
                     COUNT(c.id) AS chapter_count,
+                    SUM(CASE WHEN c.status = 'downloading' THEN 1 ELSE 0 END) AS downloading_count,
                     SUM(CASE WHEN c.status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count,
                     SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
                     SUM(CASE WHEN c.status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
@@ -180,6 +185,7 @@ class Store:
                 SELECT
                     s.*,
                     COUNT(c.id) AS chapter_count,
+                    SUM(CASE WHEN c.status = 'downloading' THEN 1 ELSE 0 END) AS downloading_count,
                     SUM(CASE WHEN c.status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count,
                     SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
                     SUM(CASE WHEN c.status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
@@ -205,6 +211,7 @@ class Store:
                 SELECT
                     s.*,
                     COUNT(c.id) AS chapter_count,
+                    SUM(CASE WHEN c.status = 'downloading' THEN 1 ELSE 0 END) AS downloading_count,
                     SUM(CASE WHEN c.status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_count,
                     SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
                     SUM(CASE WHEN c.status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
@@ -258,6 +265,20 @@ class Store:
                 (cleaned or None, series_id),
             )
         self.add_event(series_id, None, "info", "Series naming format updated.")
+        return self.get_series(series_id)
+
+    def set_series_poster(
+        self,
+        series_id: int,
+        poster_image_url: str | None,
+    ) -> dict[str, Any] | None:
+        cleaned = str(poster_image_url or "").strip() or None
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE series SET poster_image_url = ? WHERE id = ?",
+                (cleaned, series_id),
+            )
+        self.add_event(series_id, None, "info", "Series poster updated.")
         return self.get_series(series_id)
 
     def delete_series(self, series_id: int) -> None:
@@ -349,6 +370,39 @@ class Store:
             rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def list_queue_items(
+        self,
+        statuses: tuple[str, ...],
+        *,
+        series_id: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        clean_statuses = tuple(str(status).strip().lower() for status in statuses if str(status).strip())
+        if not clean_statuses:
+            return []
+
+        placeholders = ",".join("?" for _ in clean_statuses)
+        query = f"""
+            SELECT
+                c.*,
+                s.title AS series_title,
+                s.source_url AS series_source_url
+            FROM chapters c
+            JOIN series s ON s.id = c.series_id
+            WHERE c.status IN ({placeholders})
+        """
+        params: list[Any] = [*clean_statuses]
+        if series_id is not None:
+            query += " AND c.series_id = ?"
+            params.append(series_id)
+        query += " ORDER BY c.sort_key DESC, c.discovered_at ASC"
+        if limit is not None and limit > 0:
+            query += " LIMIT ?"
+            params.append(int(limit))
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def get_chapter(self, chapter_id: int) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
@@ -400,6 +454,18 @@ class Store:
                 UPDATE chapters
                 SET status = 'pending', error = NULL
                 WHERE series_id = ? AND status IN ('failed', 'skipped')
+                """,
+                (series_id,),
+            )
+            return int(cur.rowcount)
+
+    def mark_failed_pending(self, series_id: int) -> int:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                """
+                UPDATE chapters
+                SET status = 'pending', error = NULL
+                WHERE series_id = ? AND status = 'failed'
                 """,
                 (series_id,),
             )
@@ -522,9 +588,9 @@ class Store:
                     INSERT INTO series (
                         id, title, source_url, folder, check_interval_minutes,
                         enabled, backfill_existing, initialized, created_at,
-                        last_checked_at, last_error, naming_format
+                        last_checked_at, last_error, naming_format, poster_image_url
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -540,6 +606,7 @@ class Store:
                             row["last_checked_at"],
                             row["last_error"],
                             row["naming_format"],
+                            row.get("poster_image_url"),
                         )
                         for row in snapshot["series"]
                     ],
@@ -726,6 +793,7 @@ class Store:
                     "last_checked_at": self._optional_text(row.get("last_checked_at")),
                     "last_error": self._optional_text(row.get("last_error")),
                     "naming_format": self._optional_compact_text(row.get("naming_format")),
+                    "poster_image_url": self._optional_text(row.get("poster_image_url")),
                 }
             )
         return normalized
@@ -888,6 +956,7 @@ class Store:
         for key in (
             "chapter_count",
             "downloaded_count",
+            "downloading_count",
             "pending_count",
             "failed_count",
             "skipped_count",

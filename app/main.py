@@ -20,10 +20,6 @@ from .store import DEFAULT_NAMING_FORMAT, Store
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 LIBRARY_DIR = Path(os.getenv("LIBRARY_DIR", str(DATA_DIR / "library")))
 WORK_DIR = Path(os.getenv("WORK_DIR", str(DATA_DIR / "work")))
-SCHEDULER_INTERVAL_HOURS = max(
-    1.0,
-    float(os.getenv("TCB_SCHEDULER_INTERVAL_HOURS", "1")),
-)
 REQUEST_DELAY = max(0.2, float(os.getenv("TCB_REQUEST_DELAY", "0.8")))
 APP_VERSION = (os.getenv("APP_VERSION", "0.2.0").strip() or "0.2.0")
 NAMING_VARIABLES = [
@@ -57,13 +53,49 @@ NAMING_VARIABLES = [
     },
 ]
 
+
+def scheduler_poll_seconds() -> float:
+    raw_seconds = os.getenv("TCB_SCHEDULER_INTERVAL_SECONDS", "").strip()
+    if raw_seconds:
+        return max(15.0, float(raw_seconds))
+    raw_hours = os.getenv("TCB_SCHEDULER_INTERVAL_HOURS", "").strip()
+    if raw_hours:
+        return max(15.0, float(raw_hours) * 3600)
+    return 30.0
+
+
+def parse_library_roots() -> list[Path]:
+    raw = (
+        os.getenv("LIBRARY_DIRS", "").strip()
+        or os.getenv("TCB_LIBRARY_ROOTS", "").strip()
+        or os.getenv("LIBRARY_ROOTS", "").strip()
+    )
+    candidates = (
+        [item.strip() for item in re.split(r"[\n,;]+", raw) if item.strip()]
+        if raw
+        else [str(LIBRARY_DIR)]
+    )
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for item in candidates:
+        normalized = str(Path(item)).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(Path(normalized))
+    return unique or [LIBRARY_DIR]
+
+
+SCHEDULER_POLL_SECONDS = scheduler_poll_seconds()
+LIBRARY_ROOTS = parse_library_roots()
+
 app = FastAPI(title="TCBScanner")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 store = Store(DATA_DIR / "app.db")
 downloader = MangaDownloader(
     store,
-    library_dir=LIBRARY_DIR,
+    library_roots=LIBRARY_ROOTS,
     work_dir=WORK_DIR,
     request_delay=REQUEST_DELAY,
 )
@@ -76,6 +108,7 @@ class SeriesCreate(BaseModel):
     folder: str = Field(default="", max_length=240)
     check_interval_hours: float = Field(default=0.5, ge=0.5, le=168)
     naming_format: str | None = Field(default=None, max_length=180)
+    poster_image_url: str | None = Field(default=None, max_length=1200)
     enabled: bool = True
     backfill_existing: bool = False
 
@@ -107,6 +140,8 @@ class SettingsUpdate(BaseModel):
         min_length=1,
         max_length=180,
     )
+    kavita_url: str | None = Field(default=None, max_length=600)
+    komga_url: str | None = Field(default=None, max_length=600)
 
 
 class QueueChapters(BaseModel):
@@ -115,6 +150,10 @@ class QueueChapters(BaseModel):
 
 class SeriesUpdate(SeriesCreate):
     pass
+
+
+class PosterUpdate(BaseModel):
+    poster_image_url: str | None = Field(default=None, max_length=1200)
 
 
 @app.on_event("startup")
@@ -144,6 +183,9 @@ async def get_settings() -> dict[str, Any]:
     return {
         "default_naming_format": store.get_default_naming_format(),
         "variables": NAMING_VARIABLES,
+        "kavita_url": store.get_setting("kavita_url") or "",
+        "komga_url": store.get_setting("komga_url") or "",
+        "library_roots": [str(path) for path in LIBRARY_ROOTS],
     }
 
 
@@ -164,6 +206,8 @@ async def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
         "default_naming_format",
         " ".join(payload.default_naming_format.strip().split()),
     )
+    store.set_setting("kavita_url", str(payload.kavita_url or "").strip())
+    store.set_setting("komga_url", str(payload.komga_url or "").strip())
     return await get_settings()
 
 
@@ -238,6 +282,14 @@ async def set_naming_format(series_id: int, payload: NamingFormatUpdate) -> dict
     return {"series": series}
 
 
+@app.post("/api/series/{series_id}/poster")
+async def set_series_poster(series_id: int, payload: PosterUpdate) -> dict[str, Any]:
+    if not store.get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found.")
+    series = store.set_series_poster(series_id, payload.poster_image_url)
+    return {"series": series}
+
+
 @app.get("/api/series/{series_id}/chapters")
 async def list_chapters(series_id: int) -> dict[str, Any]:
     if not store.get_series(series_id):
@@ -259,6 +311,16 @@ async def download_missing(series_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Series not found.")
     changed = store.mark_missing_pending(series_id)
     store.add_event(series_id, None, "info", f"Queued {changed} skipped or failed chapter(s).")
+    schedule_download(series_id)
+    return {"queued": changed}
+
+
+@app.post("/api/series/{series_id}/queue-failed")
+async def queue_failed(series_id: int) -> dict[str, Any]:
+    if not store.get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found.")
+    changed = store.mark_failed_pending(series_id)
+    store.add_event(series_id, None, "info", f"Queued {changed} failed chapter(s).")
     schedule_download(series_id)
     return {"queued": changed}
 
@@ -304,6 +366,25 @@ async def list_events(limit: int = 100, series_id: int | None = None) -> dict[st
     return {"events": store.list_events(bounded, series_id=series_id)}
 
 
+@app.get("/api/queue")
+async def get_queue(limit: int = 120) -> dict[str, Any]:
+    bounded = max(10, min(limit, 250))
+    downloading = [
+        decorate_chapter(chapter)
+        for chapter in store.list_queue_items(("downloading",), limit=bounded)
+    ]
+    pending = [
+        decorate_chapter(chapter)
+        for chapter in store.list_queue_items(("pending",), limit=bounded)
+    ]
+    return {
+        "downloading": downloading,
+        "pending": pending,
+        "downloading_count": len(downloading),
+        "pending_count": len(pending),
+    }
+
+
 @app.get("/api/search")
 async def search_series(query: str, limit: int = 12) -> dict[str, Any]:
     cleaned = " ".join(str(query or "").strip().split())
@@ -335,22 +416,21 @@ async def monitor_loop() -> None:
     while True:
         try:
             now = datetime.now(timezone.utc)
+            due_groups: dict[int, list[int]] = {}
             for series in store.list_series():
                 if not series["enabled"]:
                     continue
-                last_checked_at = parse_datetime(series.get("last_checked_at"))
-                interval_minutes = int(series["check_interval_minutes"])
-                due = last_checked_at is None
-                if last_checked_at is not None:
-                    elapsed = (now - last_checked_at).total_seconds()
-                    due = elapsed >= interval_minutes * 60
-                if due:
-                    await downloader.check_series(int(series["id"]))
+                interval_minutes = max(1, int(series["check_interval_minutes"]))
+                if series_due_for_check(series, now):
+                    due_groups.setdefault(interval_minutes, []).append(int(series["id"]))
+            for interval_minutes in sorted(due_groups):
+                for series_id in due_groups[interval_minutes]:
+                    await downloader.check_series(series_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - keep the scheduler alive
             store.add_event(None, None, "error", f"Monitor loop error: {exc}")
-        await asyncio.sleep(SCHEDULER_INTERVAL_HOURS * 3600)
+        await asyncio.sleep(SCHEDULER_POLL_SECONDS)
 
 
 def decorate_chapter(chapter: dict[str, Any]) -> dict[str, Any]:
@@ -391,6 +471,18 @@ def parse_datetime(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def series_due_for_check(series: dict[str, Any], now: datetime | None = None) -> bool:
+    current = now or datetime.now(timezone.utc)
+    last_checked_at = parse_datetime(series.get("last_checked_at"))
+    if last_checked_at is None:
+        return True
+    interval_minutes = max(1, int(series.get("check_interval_minutes") or 0))
+    interval_seconds = interval_minutes * 60
+    current_bucket = int(current.timestamp() // interval_seconds)
+    last_bucket = int(last_checked_at.timestamp() // interval_seconds)
+    return current_bucket > last_bucket
 
 
 def display_version(value: str) -> str:

@@ -18,27 +18,27 @@
       })();
     </script>
     <link rel="icon" type="image/png" href="/static/branding/tcb-scanner-favicon.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260614b" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260614c" />
   </head>
   <body>
     <main class="app-shell">
       <div class="app-frame">
         <aside class="library-rail" id="librarySection" aria-label="Tracked library">
-          <div class="rail-scroll">
-            <section class="brand-panel" id="brandPanel">
-              <div class="brand-block">
-                <div class="brand-logo" aria-label="TCB Scanner">
-                  <img class="brand-logo-light" src="/static/branding/tcb-scanner-light.png" alt="TCB Scanner" />
-                  <img class="brand-logo-dark" src="/static/branding/tcb-scanner-dark.png" alt="TCB Scanner" />
-                </div>
-                <div class="brand-copy">
-                  <p>Manga chapter monitor &amp; CBZ download manager</p>
-                  <span>スキャン・ダウンロード・管理</span>
-                </div>
+          <section class="brand-panel" id="brandPanel">
+            <div class="brand-block">
+              <div class="brand-logo" aria-label="TCB Scanner">
+                <img class="brand-logo-light" src="/static/branding/tcb-scanner-light.png" alt="TCB Scanner" />
+                <img class="brand-logo-dark" src="/static/branding/tcb-scanner-dark.png" alt="TCB Scanner" />
               </div>
-              <div class="brand-illustration" id="brandIllustration" aria-hidden="true"></div>
-            </section>
+              <div class="brand-copy">
+                <p>Manga chapter monitor &amp; CBZ download manager</p>
+                <span>スキャン・ダウンロード・管理</span>
+              </div>
+            </div>
+            <div class="brand-illustration" id="brandIllustration" aria-hidden="true"></div>
+          </section>
 
+          <div class="rail-scroll">
             <section class="panel series-panel" aria-label="Tracked series">
               <div class="panel-heading">
                 <div>
@@ -60,7 +60,9 @@
                     autocomplete="off"
                   />
                 </label>
-                <button class="small-action" type="submit">Search</button>
+                <button class="icon-button search-button" type="submit" aria-label="Search library or supported sites">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm9.2 15.3-4.1-4.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+                </button>
                 <button class="icon-button" id="librarySearchClear" type="button" aria-label="Clear search">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
                 </button>
@@ -233,6 +235,14 @@
                     <span>Default naming format</span>
                     <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
                   </label>
+                  <label class="field-span">
+                    <span>Kavita URL</span>
+                    <input name="kavita_url" type="url" placeholder="https://kavita.example or https://kavita.example/search?query={title}" />
+                  </label>
+                  <label class="field-span">
+                    <span>Komga URL</span>
+                    <input name="komga_url" type="url" placeholder="https://komga.example or https://komga.example/search?query={title}" />
+                  </label>
                   <button class="primary-action" type="submit">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM12 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm3-10H5V5h10v4Z"/></svg>
                     <span>Save defaults</span>
@@ -277,10 +287,12 @@
         </aside>
 
         <footer class="status-strip" id="statusStrip" aria-live="polite">
-          <span class="status-primary" id="statusPrimary">Engine idle</span>
+          <button class="status-primary status-trigger" id="statusPrimary" type="button">Activity</button>
           <span class="status-version" id="statusVersion">Version 0.2.0</span>
           <span class="status-secondary" id="statusSecondary">Next scan pending</span>
         </footer>
+
+        <section class="activity-drawer hidden" id="activityDrawer" aria-label="Queue activity"></section>
       </div>
 
       <nav class="mobile-dock" aria-label="Jump between dashboard sections">
@@ -290,6 +302,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260614b"></script>
+    <script src="/static/app.js?v=20260614c"></script>
   </body>
 </html>
