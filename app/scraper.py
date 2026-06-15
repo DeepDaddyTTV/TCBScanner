@@ -26,6 +26,21 @@ BROWSERLIKE_HEADERS = {
 
 MANGADEX_API_BASE = "https://api.mangadex.org"
 MANGADEX_COVERS_BASE = "https://uploads.mangadex.org/covers"
+MANGADEX_MAX_COVER_FETCH = 100
+MANGADEX_ARTWORK_VARIANT_WORDS = {
+    "official",
+    "colored",
+    "colour",
+    "color",
+    "digital",
+    "comic",
+    "comics",
+    "edition",
+    "editions",
+    "deluxe",
+    "premium",
+    "full",
+}
 
 SERIES_ART_META_SELECTORS = (
     ("meta[property='og:image']", "content"),
@@ -260,7 +275,7 @@ def fetch_mangadex_covers_with_requests(manga_id: str, limit: int) -> dict[str, 
         f"{MANGADEX_API_BASE}/cover",
         params=[
             ("manga[]", manga_id),
-            ("limit", limit),
+            ("limit", min(max(limit, 1), MANGADEX_MAX_COVER_FETCH)),
         ],
         timeout=30,
         allow_redirects=True,
@@ -318,13 +333,27 @@ def artwork_query_variants(title: str, source_url: str) -> list[str]:
     return [item for item in dict.fromkeys(variants) if item]
 
 
-def is_exact_artwork_match(query_variants: set[str], candidate_titles: list[str]) -> bool:
+def artwork_match_rank(query_variants: set[str], candidate_titles: list[str]) -> int:
     candidate_keys = {
         normalize_artwork_key(candidate)
         for candidate in candidate_titles
         if normalize_artwork_key(candidate)
     }
-    return bool(query_variants & candidate_keys)
+    if query_variants & candidate_keys:
+        return 2
+
+    for candidate_key in candidate_keys:
+        candidate_words = candidate_key.split()
+        for query in query_variants:
+            query_words = query.split()
+            if not query_words or len(candidate_words) <= len(query_words):
+                continue
+            if candidate_words[: len(query_words)] != query_words:
+                continue
+            suffix_words = candidate_words[len(query_words) :]
+            if suffix_words and all(word in MANGADEX_ARTWORK_VARIANT_WORDS for word in suffix_words):
+                return 1
+    return 0
 
 
 def mangadex_title_variants(attributes: dict[str, object]) -> list[str]:
@@ -437,13 +466,14 @@ async def extract_series_page_artwork(source_url: str) -> list[str]:
     return dedupe_urls(image_urls)
 
 
-async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 12) -> list[str]:
+async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 8) -> list[str]:
     queries = artwork_query_variants(title, source_url)
     query_variants = set(queries)
     if not query_variants:
         return []
 
-    matched_manga_id = ""
+    matched_manga_ids: list[tuple[int, str]] = []
+    seen_manga_ids: set[str] = set()
     for query in queries:
         payload = await asyncio.to_thread(
             fetch_mangadex_search_with_requests,
@@ -457,24 +487,32 @@ async def search_mangadex_cover_art(title: str, source_url: str, limit: int = 12
             if not isinstance(attributes, dict):
                 continue
             candidate_titles = mangadex_title_variants(attributes)
-            if not is_exact_artwork_match(query_variants, candidate_titles):
+            match_rank = artwork_match_rank(query_variants, candidate_titles)
+            if not match_rank:
                 continue
             manga_id = str(item.get("id") or "").strip()
-            if manga_id:
-                matched_manga_id = manga_id
-                break
-        if matched_manga_id:
-            break
+            if not manga_id or manga_id in seen_manga_ids:
+                continue
+            seen_manga_ids.add(manga_id)
+            matched_manga_ids.append((match_rank, manga_id))
 
-    if not matched_manga_id:
+    if not matched_manga_ids:
         return []
 
-    covers_payload = await asyncio.to_thread(
-        fetch_mangadex_covers_with_requests,
-        matched_manga_id,
-        limit,
-    )
-    return dedupe_urls(mangadex_cover_urls(matched_manga_id, covers_payload, limit))
+    matched_manga_ids.sort(key=lambda item: (-item[0], item[1]))
+    curated_urls: list[str] = []
+    cover_fetch_limit = max(limit * 8, MANGADEX_MAX_COVER_FETCH)
+    for index, (_, manga_id) in enumerate(matched_manga_ids[:2]):
+        covers_payload = await asyncio.to_thread(
+            fetch_mangadex_covers_with_requests,
+            manga_id,
+            cover_fetch_limit,
+        )
+        per_series_limit = max(2, limit if index == 0 else limit // 2)
+        curated_urls.extend(mangadex_cover_urls(manga_id, covers_payload, per_series_limit))
+        if len(dedupe_urls(curated_urls)) >= limit:
+            break
+    return dedupe_urls(curated_urls)[:limit]
 
 
 async def resolve_series_artwork(title: str, source_url: str) -> dict[str, object]:
