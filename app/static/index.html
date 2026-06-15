@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/png" href="/static/branding/tcb-scanner-favicon.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260614c" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260614d" />
   </head>
   <body>
     <main class="app-shell">
@@ -40,34 +40,36 @@
 
           <div class="rail-scroll">
             <section class="panel series-panel" aria-label="Tracked series">
-              <div class="panel-heading">
-                <div>
-                  <h2>Tracked series</h2>
-                  <p>Select a title to inspect its queue.</p>
+              <div class="series-panel-chrome">
+                <div class="panel-heading">
+                  <div>
+                    <h2>Tracked series</h2>
+                    <p>Select a title to inspect its queue.</p>
+                  </div>
+                  <button class="icon-button" id="openAddSeriesButton" type="button" aria-label="Add a new series">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+                  </button>
                 </div>
-                <button class="icon-button" id="openAddSeriesButton" type="button" aria-label="Add a new series">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
-                </button>
+                <form class="rail-search" id="librarySearchForm">
+                  <label class="rail-search-field" for="librarySearchInput">
+                    <span class="visually-hidden">Search library or supported sites</span>
+                    <input
+                      id="librarySearchInput"
+                      name="query"
+                      type="search"
+                      placeholder="Search library or supported sites"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <button class="icon-button search-button" type="submit" aria-label="Search library or supported sites">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm9.2 15.3-4.1-4.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+                  </button>
+                  <button class="icon-button rail-search-clear" id="librarySearchClear" type="button" aria-label="Clear search">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+                  </button>
+                </form>
+                <p class="rail-search-meta" id="librarySearchMeta">Search your tracked library first, then supported sources.</p>
               </div>
-              <form class="rail-search" id="librarySearchForm">
-                <label class="rail-search-field" for="librarySearchInput">
-                  <span class="visually-hidden">Search library or supported sites</span>
-                  <input
-                    id="librarySearchInput"
-                    name="query"
-                    type="search"
-                    placeholder="Search library or supported sites"
-                    autocomplete="off"
-                  />
-                </label>
-                <button class="icon-button search-button" type="submit" aria-label="Search library or supported sites">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm9.2 15.3-4.1-4.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
-                </button>
-                <button class="icon-button" id="librarySearchClear" type="button" aria-label="Clear search">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
-                </button>
-              </form>
-              <p class="rail-search-meta" id="librarySearchMeta">Search your tracked library first, then supported sources.</p>
               <div class="series-list" id="seriesList"></div>
             </section>
 
@@ -113,7 +115,11 @@
                   <span class="ui-icon theme-mode-icon" id="themeModeIcon" aria-hidden="true"></span>
                   <span class="theme-selector-label">Theme</span>
                   <span class="theme-selector-value" id="themeSelectorValue">Light</span>
-                  <span class="theme-select-caret" aria-hidden="true"></span>
+                  <span class="theme-select-caret" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="square" stroke-linejoin="miter"/>
+                    </svg>
+                  </span>
                 </button>
                 <div class="theme-menu hidden" id="themeMenu" role="listbox" aria-label="Theme">
                   <button class="theme-menu-option" type="button" role="option" data-theme-option="light" aria-selected="true">
@@ -302,6 +308,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260614c"></script>
+    <script src="/static/app.js?v=20260614d"></script>
   </body>
 </html>

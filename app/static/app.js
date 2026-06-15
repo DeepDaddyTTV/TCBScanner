@@ -52,8 +52,9 @@ const CHAPTER_FILTERS = [
 ];
 
 const JIKAN_API_BASE = "https://api.jikan.moe/v4";
-const ART_CACHE_KEY = "tcbscanner-jikan-art-v4";
+const ART_CACHE_KEY = "tcbscanner-jikan-art-v5";
 const ART_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
+const MIN_POSTER_CHOICES = 5;
 
 const state = {
   series: [],
@@ -215,64 +216,61 @@ function getSeriesCoverUrl(series, art) {
 }
 
 function getMockupCoverUrl(series) {
-  const slug = normalizeSeriesKey(series?.title).replaceAll(" ", "-");
-  if (slug === "one-piece") {
-    return "/static/mockup_assets/series-one-piece-cover.png";
-  }
-  if (slug.startsWith("jujutsu-kaisen")) {
-    return "/static/mockup_assets/series-jujutsu-cover.png";
-  }
   return "";
 }
 
-function pickBestJikanMatch(title, candidates) {
+function scoreJikanCandidate(title, candidate) {
   const target = normalizeSeriesKey(title);
   const targetWords = new Set(target.split(" ").filter(Boolean));
-  let winner = null;
-  let winnerScore = -Infinity;
+  const candidateTitles = [
+    candidate.title,
+    candidate.title_english,
+    ...(candidate.titles || []).map((item) => item.title),
+  ]
+    .filter(Boolean)
+    .map(normalizeSeriesKey);
 
-  for (const candidate of candidates || []) {
-    const candidateTitles = [
-      candidate.title,
-      candidate.title_english,
-      ...(candidate.titles || []).map((item) => item.title),
-    ]
-      .filter(Boolean)
-      .map(normalizeSeriesKey);
-
-    let bestScore = -Infinity;
-    for (const candidateTitle of candidateTitles) {
-      const candidateWords = new Set(candidateTitle.split(" ").filter(Boolean));
-      const overlap = [...targetWords].filter((word) => candidateWords.has(word)).length;
-      let score = overlap * 22;
-      if (candidateTitle === target) score += 180;
-      if (candidateTitle.startsWith(target) || target.startsWith(candidateTitle)) score += 70;
-      if (candidate.type === "Manga") score += 12;
-      if (candidate.status === "Publishing") score += 8;
-      score += Number(candidate.score || 0);
-      bestScore = Math.max(bestScore, score);
-    }
-
-    if (bestScore > winnerScore) {
-      winner = candidate;
-      winnerScore = bestScore;
-    }
+  let bestScore = -Infinity;
+  for (const candidateTitle of candidateTitles) {
+    const candidateWords = new Set(candidateTitle.split(" ").filter(Boolean));
+    const overlap = [...targetWords].filter((word) => candidateWords.has(word)).length;
+    let score = overlap * 22;
+    if (candidateTitle === target) score += 180;
+    if (candidateTitle.startsWith(target) || target.startsWith(candidateTitle)) score += 70;
+    if (candidate.type === "Manga") score += 12;
+    if (candidate.status === "Publishing") score += 8;
+    score += Number(candidate.score || 0);
+    bestScore = Math.max(bestScore, score);
   }
 
-  return winner;
+  return bestScore;
 }
 
-function buildArtEntry(candidate, existing = null) {
+function rankJikanCandidates(title, candidates) {
+  return [...(candidates || [])].sort((left, right) => {
+    const delta = scoreJikanCandidate(title, right) - scoreJikanCandidate(title, left);
+    if (delta) return delta;
+    return Number(right?.members || 0) - Number(left?.members || 0);
+  });
+}
+
+function candidateCoverImageUrl(candidate) {
   const images = candidate?.images || {};
   const webp = images.webp || {};
   const jpg = images.jpg || {};
-  const coverImageUrl =
-    webp.large_image_url ||
-    webp.image_url ||
-    jpg.large_image_url ||
-    jpg.image_url ||
-    existing?.cover_image_url ||
-    "";
+  return webp.large_image_url || webp.image_url || jpg.large_image_url || jpg.image_url || "";
+}
+
+function pickBestJikanMatch(title, candidates) {
+  return rankJikanCandidates(title, candidates)[0] || null;
+}
+
+function posterChoicesFromCandidates(candidates) {
+  return dedupePosterChoices((candidates || []).map(candidateCoverImageUrl));
+}
+
+function buildArtEntry(candidate, existing = null, candidateChoices = []) {
+  const coverImageUrl = candidateCoverImageUrl(candidate) || existing?.cover_image_url || "";
   const existingChoices = Array.isArray(existing?.poster_choices) ? existing.poster_choices : [];
   return {
     cached_at: Date.now(),
@@ -280,9 +278,9 @@ function buildArtEntry(candidate, existing = null) {
     title: candidate?.title || existing?.title || "",
     mal_url: candidate?.url || existing?.mal_url || "",
     cover_image_url: coverImageUrl,
-    hero_image_url: existing?.hero_image_url || "",
+    hero_image_url: existing?.hero_image_url || coverImageUrl || "",
     pictures_hydrated: existing?.pictures_hydrated || false,
-    poster_choices: dedupePosterChoices([coverImageUrl, ...existingChoices]),
+    poster_choices: dedupePosterChoices([coverImageUrl, ...candidateChoices, ...existingChoices]),
   };
 }
 
@@ -301,23 +299,33 @@ function dedupePosterChoices(choices) {
   return [...new Set((choices || []).map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
-async function fetchSeriesArtwork(series) {
+function artworkChoiceCount(art) {
+  return dedupePosterChoices([
+    art?.cover_image_url,
+    art?.hero_image_url,
+    ...(art?.poster_choices || []),
+  ]).length;
+}
+
+async function fetchSeriesArtwork(series, options = {}) {
+  const { forceRefresh = false } = options;
   const cacheKey = normalizeSeriesKey(series.title);
   const cached = state.seriesArt[cacheKey];
-  if (cached) {
+  if (cached && !forceRefresh && artworkChoiceCount(cached) >= MIN_POSTER_CHOICES) {
     return cached;
   }
 
   const query = encodeURIComponent(series.title);
-  const search = await fetchJson(`${JIKAN_API_BASE}/manga?q=${query}&limit=3`);
-  const match = pickBestJikanMatch(series.title, search.data || []);
-  if (!match) return null;
+  const search = await fetchJson(`${JIKAN_API_BASE}/manga?q=${query}&limit=10`);
+  const rankedCandidates = rankJikanCandidates(series.title, search.data || []);
+  const match = rankedCandidates[0] || null;
+  if (!match) return cached || null;
 
-  const entry = buildArtEntry(match);
+  const entry = buildArtEntry(match, cached, posterChoicesFromCandidates(rankedCandidates.slice(0, 10)));
   state.seriesArt[cacheKey] = entry;
   persistArtCache();
 
-  if (entry.mal_id) {
+  if (entry.mal_id && (!entry.pictures_hydrated || artworkChoiceCount(entry) < MIN_POSTER_CHOICES)) {
     void enqueueArtTask(() => hydrateHeroArtwork(cacheKey, entry.mal_id));
   }
 
@@ -348,9 +356,11 @@ async function hydrateHeroArtwork(cacheKey, malId) {
       pictures_hydrated: true,
       poster_choices: dedupePosterChoices([
         current.cover_image_url,
+        current.hero_image_url,
         coverUrl,
         heroUrl,
         ...pictureUrls,
+        ...(current.poster_choices || []),
       ]),
     };
     persistArtCache();
@@ -392,10 +402,10 @@ async function openPosterPicker(selected) {
   try {
     const cacheKey = normalizeSeriesKey(selected.title);
     let art = getArtworkForSeries(selected);
-    if (!art) {
-      art = await fetchSeriesArtwork(selected);
+    if (!art || artworkChoiceCount(art) < MIN_POSTER_CHOICES) {
+      art = await fetchSeriesArtwork(selected, { forceRefresh: artworkChoiceCount(art) < MIN_POSTER_CHOICES });
     }
-    if (art?.mal_id && !art?.pictures_hydrated) {
+    if (art?.mal_id && (!art?.pictures_hydrated || artworkChoiceCount(art) < MIN_POSTER_CHOICES)) {
       art = await hydrateHeroArtwork(cacheKey, art.mal_id);
     }
     const latest = art || getArtworkForSeries(selected);
@@ -1058,7 +1068,7 @@ function renderSeriesFocus() {
   const art = getArtworkForSeries(artSeries);
   const heroUrl = selectArtworkUrl(art, "hero") || selectArtworkUrl(art, "cover");
   const seriesSlug = normalizeSeriesKey(focusSeries.title).replaceAll(" ", "-");
-  const useMockupArt = !isPreview && seriesSlug === "one-piece";
+  const useMockupArt = false;
   const focusArtUrl = useMockupArt ? "/static/mockup_assets/hero-art.png" : heroUrl;
   const focusDensityClass = getFocusDensityClass(focusSeries.title);
   const focusEmblem = getFocusEmblem(focusSeries, art, useMockupArt);
