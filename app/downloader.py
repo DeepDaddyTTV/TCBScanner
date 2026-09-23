@@ -106,8 +106,10 @@ class MangaDownloader:
             staging_dir.mkdir(parents=True, exist_ok=True)
 
             await asyncio.sleep(self.request_delay)
-            html = await scraper.fetch_html(str(chapter["source_url"]))
-            images = scraper.parse_page_images(html, str(chapter["source_url"]))
+            images = await scraper.discover_page_images(
+                str(chapter["source_url"]),
+                request_delay=self.request_delay,
+            )
             if not images:
                 raise ValueError("No chapter page images were found.")
 

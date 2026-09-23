@@ -66,7 +66,7 @@ Supported environment variables:
 
 ## Supported Sites
 
-The current release supports 28 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.
+The current release supports 29 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.
 
 | Site | Domain | Provider family |
 | --- | --- | --- |
@@ -98,8 +98,11 @@ The current release supports 28 domains. This rollout keeps the easy public HTML
 | [ManhwaZ](https://manhwaz.com/) | `manhwaz.com` | Webtoon portal HTML |
 | [ManhwaHub](https://manhwahub.net/) | `manhwahub.net` | Webtoon portal HTML |
 | [KuraManga](https://kuramanga.com/) | `kuramanga.com` | Flat series slug HTML |
+| [WeebCentral](https://weebcentral.com/) | `weebcentral.com` | WeebCentral HTML fragments |
 
 If a supported site changes its markup or introduces stricter bot protection, that site may need a provider refresh before scans succeed again.
+
+Title search checks WeebCentral and Mangack first for fast broad coverage. It only queries the remaining searchable providers when those two return no matches.
 
 ## Add a Series
 
@@ -122,6 +125,7 @@ https://todaymanga.com/book/take-a-peek/chapter-list
 https://templescan.net/comic/a-lifelong-yearning-for-you
 https://manhwaz.com/webtoon/raising-villains-the-right-way
 https://kuramanga.com/eleceed
+https://weebcentral.com/series/01J76XY7EBJ4EG5QDZJYFTF8K8/Ao-No-Exorcist
 ```
 
 You can also paste a chapter URL; the app will try to resolve it back to the parent series page when that site exposes enough structure to do so.

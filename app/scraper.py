@@ -49,6 +49,7 @@ ARTWORK_SEARCH_LIMIT = 5
 ARTWORK_MIN_POSTER_CHOICES = 5
 ARTWORK_CACHE_TTL_SECONDS = 60 * 60 * 12
 JIKAN_REQUEST_GAP_SECONDS = 1.25
+PRIMARY_SOURCE_SEARCH_DOMAINS = {"weebcentral.com", "mangack.com"}
 
 SERIES_ART_META_SELECTORS = (
     ("meta[property='og:image']", "content"),
@@ -126,6 +127,10 @@ KURAMANGA_SITES = (
     {"name": "KuraManga", "domain": "kuramanga.com"},
 )
 
+WEEBCENTRAL_SITES = (
+    {"name": "WeebCentral", "domain": "weebcentral.com"},
+)
+
 SUPPORTED_SOURCE_GROUPS = (
     {
         "provider": "tcb",
@@ -161,6 +166,11 @@ SUPPORTED_SOURCE_GROUPS = (
         "provider": "kuramanga",
         "family": "Flat series slug HTML",
         "sites": KURAMANGA_SITES,
+    },
+    {
+        "provider": "weebcentral",
+        "family": "WeebCentral HTML fragments",
+        "sites": WEEBCENTRAL_SITES,
     },
 )
 
@@ -235,6 +245,10 @@ async def fetch_html(url: str) -> str:
     return await asyncio.to_thread(fetch_html_with_requests, url)
 
 
+async def post_html(url: str, data: dict[str, str]) -> str:
+    return await asyncio.to_thread(post_html_with_requests, url, data)
+
+
 async def fetch_bytes(url: str, *, referer: str | None = None) -> tuple[bytes, str]:
     headers = dict(HEADERS)
     headers["Accept"] = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
@@ -255,6 +269,22 @@ def fetch_html_with_requests(url: str) -> str:
     import requests
 
     response = requests.get(url, headers=BROWSERLIKE_HEADERS, timeout=30, allow_redirects=True)
+    response.raise_for_status()
+    return response.text
+
+
+def post_html_with_requests(url: str, data: dict[str, str]) -> str:
+    import requests
+
+    headers = dict(BROWSERLIKE_HEADERS)
+    headers["HX-Request"] = "true"
+    response = requests.post(
+        url,
+        data=data,
+        headers=headers,
+        timeout=30,
+        allow_redirects=True,
+    )
     response.raise_for_status()
     return response.text
 
@@ -1031,7 +1061,7 @@ async def search_supported_series(query: str, limit: int = 12) -> list[dict[str,
     if len(cleaned) < 2:
         return []
 
-    searchable_providers = {"wordpress_manga", "webtoon_portal", "kuramanga"}
+    searchable_providers = {"wordpress_manga", "webtoon_portal", "kuramanga", "weebcentral"}
     semaphore = asyncio.Semaphore(6)
 
     async def run_site_search(group: dict[str, object], site: dict[str, object]) -> list[SourceSearchCandidate]:
@@ -1046,13 +1076,29 @@ async def search_supported_series(query: str, limit: int = 12) -> list[dict[str,
             except Exception:
                 return []
 
-    tasks = [
-        run_site_search(group, site)
+    searchable_sites = [
+        (group, site)
         for group in SUPPORTED_SOURCE_GROUPS
         if str(group["provider"]) in searchable_providers
         for site in group["sites"]
     ]
-    results = await asyncio.gather(*tasks) if tasks else []
+
+    primary_sites = [
+        (group, site)
+        for group, site in searchable_sites
+        if str(site["domain"]) in PRIMARY_SOURCE_SEARCH_DOMAINS
+    ]
+    fallback_sites = [
+        (group, site)
+        for group, site in searchable_sites
+        if str(site["domain"]) not in PRIMARY_SOURCE_SEARCH_DOMAINS
+    ]
+
+    primary_tasks = [run_site_search(group, site) for group, site in primary_sites]
+    results = await asyncio.gather(*primary_tasks) if primary_tasks else []
+    if not any(results):
+        fallback_tasks = [run_site_search(group, site) for group, site in fallback_sites]
+        results.extend(await asyncio.gather(*fallback_tasks) if fallback_tasks else [])
 
     deduped: dict[str, SourceSearchCandidate] = {}
     for batch in results:
@@ -1098,6 +1144,10 @@ async def search_supported_site(
         search_url = f"{base_url}?s={quote_plus(query)}"
         html = await fetch_html(search_url)
         return parse_kuramanga_search_candidates(html, search_url, site, query, provider, family)
+    if provider == "weebcentral":
+        search_url = f"{base_url}search/simple?location=main"
+        html = await post_html(search_url, {"text": query})
+        return parse_weebcentral_search_candidates(html, search_url, site, query, provider, family)
     return []
 
 
@@ -1121,7 +1171,25 @@ async def discover_chapters(
         return await discover_webtoon_portal_chapters(source_url, request_delay=request_delay)
     if provider == "kuramanga":
         return await discover_kuramanga_chapters(source_url, request_delay=request_delay)
+    if provider == "weebcentral":
+        return await discover_weebcentral_chapters(source_url, request_delay=request_delay)
     raise ValueError("This site is not in the current supported source list.")
+
+
+async def discover_page_images(
+    chapter_url: str,
+    *,
+    request_delay: float = 0.0,
+) -> list[dict[str, object]]:
+    html = await fetch_html(chapter_url)
+    if detect_provider(chapter_url) == "weebcentral":
+        images_url = derive_weebcentral_images_url(chapter_url)
+        if not images_url:
+            return []
+        if request_delay > 0:
+            await asyncio.sleep(request_delay)
+        html = await fetch_html(images_url)
+    return parse_page_images(html, chapter_url)
 
 
 def parse_page_images(html: str, base_url: str) -> list[dict[str, object]]:
@@ -1140,6 +1208,8 @@ def parse_page_images(html: str, base_url: str) -> list[dict[str, object]]:
         return parse_webtoon_portal_page_images(html, base_url)
     if provider == "kuramanga":
         return parse_kuramanga_page_images(html, base_url)
+    if provider == "weebcentral":
+        return parse_weebcentral_page_images(html, base_url)
     raise ValueError("This chapter source is not supported.")
 
 
@@ -1398,6 +1468,43 @@ async def discover_kuramanga_chapters(
     raise ValueError("No chapter links were found on that page.")
 
 
+async def discover_weebcentral_chapters(
+    source_url: str,
+    *,
+    request_delay: float = 0.0,
+) -> tuple[str, list[dict[str, object]]]:
+    html = await fetch_html(source_url)
+    page_url = source_url
+
+    if is_weebcentral_chapter_url(source_url):
+        series_url = find_weebcentral_series_url(html, source_url)
+        if series_url:
+            page_url = series_url
+
+    full_list_url = derive_weebcentral_full_list_url(page_url)
+    if full_list_url:
+        if request_delay > 0:
+            await asyncio.sleep(request_delay)
+        chapter_html = await fetch_html(full_list_url)
+        chapters = parse_weebcentral_chapter_links(chapter_html, page_url)
+        if chapters:
+            return page_url, chapters
+
+    if is_weebcentral_chapter_url(source_url):
+        title = parse_chapter_title(html, source_url)
+        chapter_key, sort_key = parse_chapter_key(title, source_url)
+        return source_url, [
+            {
+                "url": source_url,
+                "title": title,
+                "chapter_key": chapter_key,
+                "sort_key": sort_key,
+            }
+        ]
+
+    raise ValueError("No chapter links were found on that page.")
+
+
 def parse_tcb_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
     soup = BeautifulSoup(html, "lxml")
     found: dict[str, ChapterLink] = {}
@@ -1576,6 +1683,29 @@ def parse_kuramanga_chapter_links(html: str, base_url: str) -> list[dict[str, ob
     ]
 
 
+def parse_weebcentral_chapter_links(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    found: dict[str, ChapterLink] = {}
+
+    for anchor in soup.find_all("a", href=True):
+        url = normalize_url(urljoin(base_url, str(anchor.get("href") or "").strip()))
+        if not is_weebcentral_chapter_url(url):
+            continue
+        title_node = anchor.select_one("span.grow > span")
+        title = " ".join(
+            (title_node.get_text(" ", strip=True) if title_node else anchor.get_text(" ", strip=True)).split()
+        )
+        if not title:
+            title = title_from_url(url)
+        chapter_key, sort_key = parse_chapter_key(title, url)
+        found[url] = ChapterLink(url, title, chapter_key, sort_key)
+
+    return [
+        link.__dict__
+        for link in sorted(found.values(), key=lambda item: (item.sort_key, item.url))
+    ]
+
+
 def parse_wordpress_search_candidates(
     html: str,
     base_url: str,
@@ -1684,6 +1814,33 @@ def parse_kuramanga_search_candidates(
     return list(found.values())
 
 
+def parse_weebcentral_search_candidates(
+    html: str,
+    base_url: str,
+    site: dict[str, object],
+    query: str,
+    provider: str,
+    family: str,
+) -> list[SourceSearchCandidate]:
+    soup = BeautifulSoup(html, "lxml")
+    found: dict[str, SourceSearchCandidate] = {}
+
+    for anchor in soup.find_all("a", href=True):
+        url = normalize_url(urljoin(base_url, str(anchor.get("href") or "").strip()))
+        if not is_weebcentral_series_url(url):
+            continue
+        title = extract_search_result_title(anchor, url)
+        score = search_candidate_score(query, title, url)
+        if score < 18:
+            continue
+        candidate = build_source_search_candidate(site, title, url, score, provider, family)
+        existing = found.get(url)
+        if existing is None or candidate.score > existing.score:
+            found[url] = candidate
+
+    return list(found.values())
+
+
 def find_tcb_all_chapters_url(html: str, base_url: str) -> str | None:
     soup = BeautifulSoup(html, "lxml")
     for anchor in soup.find_all("a", href=True):
@@ -1725,6 +1882,15 @@ def find_wordpress_series_url(html: str, base_url: str) -> str | None:
         return None
     candidates.sort()
     return candidates[0][3]
+
+
+def find_weebcentral_series_url(html: str, base_url: str) -> str | None:
+    soup = BeautifulSoup(html, "lxml")
+    for anchor in soup.find_all("a", href=True):
+        url = normalize_url(urljoin(base_url, str(anchor.get("href") or "").strip()))
+        if is_weebcentral_series_url(url):
+            return url
+    return None
 
 
 def parse_chapter_title(html: str, fallback_url: str) -> str:
@@ -1981,6 +2147,30 @@ def parse_kuramanga_page_images(html: str, base_url: str) -> list[dict[str, obje
     ]
 
 
+def parse_weebcentral_page_images(html: str, base_url: str) -> list[dict[str, object]]:
+    soup = BeautifulSoup(html, "lxml")
+    image_nodes = soup.select("#chapter-images img") or soup.find_all("img")
+    images: list[PageImage] = []
+    seen: set[str] = set()
+
+    for image in image_nodes:
+        raw_url = str(image.get("src") or "").strip()
+        if not raw_url:
+            continue
+        url = normalize_url(urljoin(base_url, raw_url))
+        alt = " ".join(str(image.get("alt") or "").split())
+        if url in seen or not looks_like_weebcentral_page_image(url, alt):
+            continue
+        page_number = parse_page_number(alt) or parse_page_number_from_url(url) or len(images) + 1
+        images.append(PageImage(url, page_number, extension_from_url(url)))
+        seen.add(url)
+
+    return [
+        page.__dict__
+        for page in sorted(images, key=lambda item: (item.page_number, item.url))
+    ]
+
+
 def parse_chapter_key(title: str, url: str) -> tuple[str, float]:
     candidates = [title, url.replace("-", " ").replace("/", " ")]
     for candidate in candidates:
@@ -2119,6 +2309,16 @@ def looks_like_kuramanga_page_image(url: str) -> bool:
     if any(token in lowered_path for token in ("cover", "thumbnail", "icon", "favicon", "logo")):
         return False
     return True
+
+
+def looks_like_weebcentral_page_image(url: str, alt: str) -> bool:
+    parsed = urlparse(url)
+    lowered_path = parsed.path.lower()
+    if any(token in lowered_path for token in ("broken_image", "logo", "favicon", "cover/")):
+        return False
+    if re.search(r"\bpage\s+\d+\b", alt, re.IGNORECASE):
+        return True
+    return re.search(r"/\d{3,5}-\d{3,4}\.(?:jpg|jpeg|png|webp|gif)$", lowered_path) is not None
 
 
 def prune_page_images_by_bucket(images: list[PageImage]) -> list[PageImage]:
@@ -2326,6 +2526,8 @@ def is_chapter_url(url: str) -> bool:
         return is_webtoon_portal_chapter_url(url)
     if provider == "kuramanga":
         return is_kuramanga_chapter_url(url)
+    if provider == "weebcentral":
+        return is_weebcentral_chapter_url(url)
     return False
 
 
@@ -2373,6 +2575,23 @@ def is_webtoon_portal_chapter_url(url: str) -> bool:
 def is_kuramanga_chapter_url(url: str) -> bool:
     parts = [part for part in urlparse(url).path.split("/") if part]
     return len(parts) >= 2 and parts[1].lower().startswith("chapter-")
+
+
+def is_weebcentral_chapter_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    return len(parts) == 2 and parts[0].lower() == "chapters" and bool(parts[1])
+
+
+def is_weebcentral_series_url(url: str) -> bool:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    if not (2 <= len(parts) <= 3 and parts[0].lower() == "series" and bool(parts[1])):
+        return False
+    return len(parts) == 2 or parts[2].lower() not in {
+        "full-chapter-list",
+        "chapter-select",
+        "subscribe",
+        "rss",
+    }
 
 
 def is_webtoon_portal_series_url(url: str) -> bool:
@@ -2500,6 +2719,25 @@ def derive_kuramanga_series_url(url: str) -> str | None:
         return None
     path = "/" + parts[0]
     return parsed._replace(path=path, query="", fragment="").geturl()
+
+
+def derive_weebcentral_full_list_url(url: str) -> str | None:
+    parsed = urlparse(normalize_url(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2 or parts[0].lower() != "series":
+        return None
+    path = f"/series/{parts[1]}/full-chapter-list"
+    return parsed._replace(path=path, query="", fragment="").geturl()
+
+
+def derive_weebcentral_images_url(url: str) -> str | None:
+    parsed = urlparse(normalize_url(url))
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) != 2 or parts[0].lower() != "chapters":
+        return None
+    path = f"/chapters/{parts[1]}/images"
+    query = "is_prev=False&reading_style=long_strip&current_page=1"
+    return parsed._replace(path=path, query=query, fragment="").geturl()
 
 
 def site_home_url(site: dict[str, object]) -> str:
