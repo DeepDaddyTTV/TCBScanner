@@ -64,6 +64,8 @@ Supported environment variables:
 - `TCB_REQUEST_DELAY`: Delay between source requests, in seconds. Default: `0.8`.
 - `APP_VERSION`: Version label shown in the footer. The GitHub image pipeline sets this automatically as `0.2.x`, where `x` is the current repo revision count.
 
+Downloads interrupted by a container or host restart are automatically returned to the pending queue when the app starts again.
+
 ## Supported Sites
 
 The current release supports 29 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.

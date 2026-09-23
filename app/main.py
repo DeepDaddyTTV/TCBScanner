@@ -188,6 +188,14 @@ class PosterUpdate(BaseModel):
 @app.on_event("startup")
 async def startup() -> None:
     global monitor_task
+    for series_id, chapter_count in store.recover_interrupted_downloads().items():
+        store.add_event(
+            series_id,
+            None,
+            "info",
+            f"Recovered {chapter_count} interrupted download(s) after restart.",
+        )
+        schedule_download(series_id)
     monitor_task = asyncio.create_task(monitor_loop())
 
 

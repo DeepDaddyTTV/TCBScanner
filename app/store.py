@@ -370,6 +370,30 @@ class Store:
             rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def recover_interrupted_downloads(self) -> dict[int, int]:
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                """
+                SELECT series_id, COUNT(*) AS chapter_count
+                FROM chapters
+                WHERE status = 'downloading'
+                GROUP BY series_id
+                """
+            ).fetchall()
+            recovered = {
+                int(row["series_id"]): int(row["chapter_count"])
+                for row in rows
+            }
+            if recovered:
+                self._conn.execute(
+                    """
+                    UPDATE chapters
+                    SET status = 'pending', error = NULL
+                    WHERE status = 'downloading'
+                    """
+                )
+        return recovered
+
     def list_queue_items(
         self,
         statuses: tuple[str, ...],
