@@ -81,6 +81,8 @@ const state = {
   settings: {
     default_naming_format: "{ChapterFullTitle}",
     default_metadata_provider: "anilist",
+    global_scan_time: "20:00",
+    scan_time_zone: "America/New_York",
     variables: [],
     kavita_url: "",
     komga_url: "",
@@ -364,7 +366,6 @@ function defaultSeriesDraft(overrides = {}) {
     metadata_url: "",
     metadata_chapter_count: "",
     folder: "",
-    check_interval_hours: "0.5",
     naming_format: "",
     enabled: true,
     backfill_existing: false,
@@ -387,7 +388,6 @@ function seriesToDraft(series) {
     metadata_url: String(series.metadata_url || ""),
     metadata_chapter_count: String(series.metadata_chapter_count || ""),
     folder: String(series.folder || ""),
-    check_interval_hours: String(Math.max(0.5, Number(series.check_interval_minutes || 30) / 60)),
     naming_format: String(series.naming_format || ""),
     enabled: Boolean(series.enabled),
     backfill_existing: Boolean(series.backfill_existing),
@@ -444,14 +444,6 @@ function readDraftValue(draft, key, fallback) {
 }
 
 function buildSeriesFromDraft(draft, fallback = {}) {
-  const intervalHours = Number(
-    readDraftValue(
-      draft,
-      "check_interval_hours",
-      String(Math.max(0.5, Number(fallback.check_interval_minutes || 30) / 60)),
-    ) || 0.5,
-  );
-
   return {
     ...fallback,
     title: String(readDraftValue(draft, "title", fallback.title || "")),
@@ -476,7 +468,6 @@ function buildSeriesFromDraft(draft, fallback = {}) {
       fallback.metadata_chapter_count || null,
     ) || null,
     folder: String(readDraftValue(draft, "folder", fallback.folder || fallback.title || "")),
-    check_interval_minutes: Math.max(30, Math.round(intervalHours * 60)),
     naming_format: String(readDraftValue(draft, "naming_format", fallback.naming_format || "")),
     poster_image_url: String(readDraftValue(draft, "poster_image_url", fallback.poster_image_url || "")),
     enabled: Boolean(readDraftValue(draft, "enabled", fallback.enabled)),
@@ -504,7 +495,6 @@ function getPreviewSeries() {
     metadata_url: "",
     metadata_chapter_count: null,
     folder: state.searchPreview.title || "",
-    check_interval_minutes: 30,
     naming_format: "",
     enabled: true,
     backfill_existing: false,
@@ -545,7 +535,6 @@ function selectSearchPreview(match) {
     title: match.title || "",
     source_url: match.url || "",
     folder: match.title || "",
-    check_interval_hours: "0.5",
     naming_format: "",
     enabled: true,
     backfill_existing: false,
@@ -740,6 +729,10 @@ function renderSettings() {
   const metadataProviderInput = optionsForm?.elements.default_metadata_provider;
   if (metadataProviderInput && document.activeElement !== metadataProviderInput) {
     metadataProviderInput.value = state.settings.default_metadata_provider || "anilist";
+  }
+  const scanTimeInput = optionsForm?.elements.global_scan_time;
+  if (scanTimeInput && document.activeElement !== scanTimeInput) {
+    scanTimeInput.value = state.settings.global_scan_time || "20:00";
   }
 
   const variables = $("#namingVariables");
@@ -992,7 +985,7 @@ function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
         </div>
 
         <div class="series-meta">
-          <span>${escapeHtml(formatCadence(series.check_interval_minutes))}</span>
+          <span>${escapeHtml(formatGlobalScanTime())}</span>
           <span>${escapeHtml(formatRelativeTime(series.last_checked_at))}</span>
         </div>
 
@@ -1119,7 +1112,7 @@ function renderSeriesFocus() {
           <div class="focus-detail-grid">
             <span><strong>Library:</strong><em>${escapeHtml(focusSeries.title)}</em></span>
             <span><strong>Folder:</strong><em>${escapeHtml(folderDisplay)}</em></span>
-            <span><strong>Interval:</strong><em>${escapeHtml(formatInterval(focusSeries.check_interval_minutes))}</em></span>
+            <span><strong>Schedule:</strong><em>${escapeHtml(formatGlobalScanTime())}</em></span>
           </div>
           <p class="focus-detail focus-detail-naming"><strong>Naming:</strong><span>${escapeHtml(namingPreview)}</span></p>
         </div>
@@ -1347,7 +1340,7 @@ function renderDetailsSidebar(selected) {
     <div class="panel-heading">
       <div>
         <h2>Series details</h2>
-        <p>The selected title's current source, cadence, folder, and naming summary.</p>
+        <p>The selected title's source, global scan schedule, folder, and naming summary.</p>
       </div>
       <button class="small-action compact-action" type="button" data-sidebar-switch="settings">Edit</button>
     </div>
@@ -1362,7 +1355,7 @@ function renderDetailsSidebar(selected) {
           : "Not matched",
       )}
       ${sidebarDetailRow("Save folder", escapeHtml(formatFolderDisplay(selected.folder || selected.title)))}
-      ${sidebarDetailRow("Check interval", escapeHtml(formatCadence(selected.check_interval_minutes)))}
+      ${sidebarDetailRow("Daily scan", escapeHtml(formatGlobalScanTime()))}
       ${sidebarDetailRow("Naming format", escapeHtml(getNamingPreview(selected)))}
       ${sidebarDetailRow("Monitoring", selected.enabled ? "Enabled" : "Paused")}
       ${sidebarDetailRow("Backfill existing", selected.backfill_existing ? "Enabled" : "Disabled")}
@@ -1553,7 +1546,7 @@ function renderSeriesSettingsSidebar(selected) {
     ${renderSeriesForm({
       mode: "edit",
       title: "Series settings",
-      description: `Change the tracked source, naming, monitoring cadence, and archive behavior for ${selected.title}.`,
+      description: `Change the tracked source, naming, monitoring, and archive behavior for ${selected.title}.`,
       draft: state.editDraft || seriesToDraft(selected),
       submitLabel: "Save series settings",
       submitIcon: icons.check,
@@ -1690,15 +1683,6 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
         </span>
       </label>
       <label class="field-span">
-        <span>Check interval</span>
-        <span class="select-shell">
-          <select name="check_interval_hours">
-            ${renderIntervalOptions(String(safeDraft.check_interval_hours || "0.5"))}
-          </select>
-          <span class="select-caret" aria-hidden="true"></span>
-        </span>
-      </label>
-      <label class="field-span">
         <span>Naming format</span>
         <input
           name="naming_format"
@@ -1807,26 +1791,6 @@ function renderCompactVariableTokens(context = "series") {
           <code>${escapeHtml(formatVariableToken(variable.name))}</code>
         </button>
       `,
-    )
-    .join("");
-}
-
-function renderIntervalOptions(selectedValue) {
-  const options = [
-    ["0.5", "30 minutes"],
-    ["1", "1 hour"],
-    ["2", "2 hours"],
-    ["6", "6 hours"],
-    ["12", "12 hours"],
-    ["24", "24 hours"],
-    ["48", "48 hours"],
-    ["72", "72 hours"],
-    ["168", "1 week"],
-  ];
-  return options
-    .map(
-      ([value, label]) =>
-        `<option value="${value}" ${String(selectedValue) === String(value) ? "selected" : ""}>${label}</option>`,
     )
     .join("");
 }
@@ -2429,7 +2393,7 @@ function buildSeriesNote(series) {
   if (Number(series.pending_count || 0) > 0) {
     return "Downloads are already queued for this title. The worker will continue packaging chapters into CBZ files in order.";
   }
-  return "This title looks clean right now. Run a manual check if you want to force discovery ahead of the normal interval.";
+  return "This title looks clean right now. Run a manual check or wait for the next global daily scan.";
 }
 
 function buildChapterCountLabel(selected, visibleCount) {
@@ -2663,57 +2627,19 @@ function fileNameFromPath(value) {
   return String(value || "").split(/[\\/]/).filter(Boolean).pop() || value;
 }
 
-function formatInterval(minutes) {
-  const totalMinutes = Number(minutes || 0);
-  if (!totalMinutes) return "Manual cadence";
-  if (totalMinutes < 60) {
-    return `${totalMinutes}m`;
-  }
-  if (totalMinutes < 1440) {
-    const hours = totalMinutes / 60;
-    return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
-  }
-  const days = totalMinutes / 1440;
-  return `${Number.isInteger(days) ? days : days.toFixed(1)}d`;
-}
-
-function formatCadence(minutes) {
-  const label = formatInterval(minutes);
-  return label === "Manual cadence" ? label : `${label} cadence`;
+function formatGlobalScanTime() {
+  const [rawHour, rawMinute] = String(state.settings.global_scan_time || "20:00").split(":");
+  const hour = Number(rawHour);
+  const minute = String(rawMinute || "00").padStart(2, "0");
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `Daily at ${displayHour}:${minute} ${suffix} ET`;
 }
 
 function getNextScanLabel() {
   const enabled = state.series.filter((series) => series.enabled);
   if (!enabled.length) return "Next scan pending";
-
-  let soonest = null;
-  for (const series of enabled) {
-    if (!series.last_checked_at) {
-      return "Next scan due now";
-    }
-    const lastChecked = new Date(series.last_checked_at);
-    if (Number.isNaN(lastChecked.getTime())) continue;
-    const intervalMs = Math.max(1, Number(series.check_interval_minutes || 0)) * 60 * 1000;
-    const dueAt = (Math.floor(lastChecked.getTime() / intervalMs) + 1) * intervalMs;
-    if (soonest === null || dueAt < soonest) {
-      soonest = dueAt;
-    }
-  }
-
-  if (soonest === null) return "Next scan pending";
-  const diff = soonest - Date.now();
-  if (diff <= 0) return "Next scan due now";
-  return `Next scan in ${formatDuration(diff)}`;
-}
-
-function formatDuration(valueMs) {
-  const totalSeconds = Math.max(0, Math.floor(valueMs / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return [hours, minutes, seconds]
-    .map((value) => String(value).padStart(2, "0"))
-    .join(":");
+  return `Next scan: ${formatGlobalScanTime()}`;
 }
 
 function formatRelativeTime(value) {
@@ -2923,7 +2849,6 @@ function readSeriesFormPayload(form) {
     metadata_chapter_count: Number(formData.get("metadata_chapter_count") || 0) || null,
     title: String(formData.get("title") || "").trim(),
     folder: String(formData.get("folder") || "").trim(),
-    check_interval_hours: Number(formData.get("check_interval_hours") || 0.5),
     naming_format: String(formData.get("naming_format") || "").trim(),
     enabled: formData.get("enabled") === "on",
     backfill_existing: formData.get("backfill_existing") === "on",
@@ -2964,7 +2889,6 @@ function syncDraftFromPayload(payload, mode) {
     metadata_url: payload.metadata_url || "",
     metadata_chapter_count: payload.metadata_chapter_count || "",
     folder: payload.folder,
-    check_interval_hours: String(payload.check_interval_hours || "0.5"),
     naming_format: payload.naming_format || "",
     enabled: Boolean(payload.enabled),
     backfill_existing: Boolean(payload.backfill_existing),
@@ -3078,6 +3002,7 @@ listen($("#optionsForm"), "submit", async (event) => {
     body: JSON.stringify({
       default_naming_format: String(form.get("default_naming_format") || "{ChapterFullTitle}"),
       default_metadata_provider: String(form.get("default_metadata_provider") || "anilist"),
+      global_scan_time: String(form.get("global_scan_time") || "20:00"),
       kavita_url: String(form.get("kavita_url") || "").trim(),
       komga_url: String(form.get("komga_url") || "").trim(),
     }),

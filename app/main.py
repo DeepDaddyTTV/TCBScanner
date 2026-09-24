@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
@@ -25,6 +26,8 @@ WORK_DIR = Path(os.getenv("WORK_DIR", str(DATA_DIR / "work")))
 REQUEST_DELAY = max(0.2, float(os.getenv("TCB_REQUEST_DELAY", "0.8")))
 APP_VERSION = (os.getenv("APP_VERSION", "0.2.0").strip() or "0.2.0")
 DEFAULT_METADATA_PROVIDER = "anilist"
+DEFAULT_SCAN_TIME = "20:00"
+SCAN_TIME_ZONE = ZoneInfo("America/New_York")
 METADATA_PROVIDERS = [
     {"id": "anilist", "name": "AniList"},
     {"id": "mangaupdates", "name": "MangaUpdates"},
@@ -220,6 +223,7 @@ class SettingsUpdate(BaseModel):
     kavita_url: str | None = Field(default=None, max_length=600)
     komga_url: str | None = Field(default=None, max_length=600)
     default_metadata_provider: str = DEFAULT_METADATA_PROVIDER
+    global_scan_time: str = Field(default=DEFAULT_SCAN_TIME, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
     @field_validator("default_metadata_provider")
     @classmethod
@@ -286,6 +290,8 @@ async def get_settings() -> dict[str, Any]:
         "komga_url": store.get_setting("komga_url") or "",
         "default_metadata_provider": store.get_setting("default_metadata_provider")
         or DEFAULT_METADATA_PROVIDER,
+        "global_scan_time": store.get_setting("global_scan_time") or DEFAULT_SCAN_TIME,
+        "scan_time_zone": "America/New_York",
         "library_roots": [str(path) for path in LIBRARY_ROOTS],
     }
 
@@ -379,6 +385,7 @@ async def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
     store.set_setting("kavita_url", str(payload.kavita_url or "").strip())
     store.set_setting("komga_url", str(payload.komga_url or "").strip())
     store.set_setting("default_metadata_provider", payload.default_metadata_provider)
+    store.set_setting("global_scan_time", payload.global_scan_time)
     return await get_settings()
 
 
@@ -674,17 +681,21 @@ def schedule_download(series_id: int) -> None:
 async def monitor_loop() -> None:
     while True:
         try:
-            now = datetime.now(timezone.utc)
-            due_groups: dict[int, list[int]] = {}
-            for series in store.list_series():
-                if not series["enabled"]:
-                    continue
-                interval_minutes = max(1, int(series["check_interval_minutes"]))
-                if series_due_for_check(series, now):
-                    due_groups.setdefault(interval_minutes, []).append(int(series["id"]))
-            for interval_minutes in sorted(due_groups):
-                for series_id in due_groups[interval_minutes]:
-                    await downloader.check_series(series_id)
+            local_now = datetime.now(SCAN_TIME_ZONE)
+            try:
+                scan_time = datetime.strptime(
+                    store.get_setting("global_scan_time") or DEFAULT_SCAN_TIME,
+                    "%H:%M",
+                ).time()
+            except ValueError:
+                scan_time = datetime.strptime(DEFAULT_SCAN_TIME, "%H:%M").time()
+            last_scan_date = store.get_setting("last_global_scan_date")
+            if local_now.time() >= scan_time and last_scan_date != local_now.date().isoformat():
+                # Mark the daily run before starting so a restart cannot fan out duplicate scans.
+                store.set_setting("last_global_scan_date", local_now.date().isoformat())
+                for series in store.list_series():
+                    if series["enabled"]:
+                        await downloader.check_series(int(series["id"]))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - keep the scheduler alive
@@ -718,30 +729,6 @@ def format_file_size(size_bytes: int | None) -> str:
     if size_bytes >= 1024:
         return f"{size_bytes / 1024:.1f} KB"
     return f"{size_bytes} B"
-
-
-def parse_datetime(value: object) -> datetime | None:
-    if not value or not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def series_due_for_check(series: dict[str, Any], now: datetime | None = None) -> bool:
-    current = now or datetime.now(timezone.utc)
-    last_checked_at = parse_datetime(series.get("last_checked_at"))
-    if last_checked_at is None:
-        return True
-    interval_minutes = max(1, int(series.get("check_interval_minutes") or 0))
-    interval_seconds = interval_minutes * 60
-    current_bucket = int(current.timestamp() // interval_seconds)
-    last_bucket = int(last_checked_at.timestamp() // interval_seconds)
-    return current_bucket > last_bucket
 
 
 def display_version(value: str) -> str:

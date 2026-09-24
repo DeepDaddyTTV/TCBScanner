@@ -146,7 +146,7 @@ Fields:
 - `Metadata provider override`: Use the global AniList or MangaUpdates default, or choose a different provider for this series. Metadata matching does not replace or change the configured source pages.
 - `Library title`: Used for chapter file names when the source title is missing.
 - `Folder`: Select a destination under a configured root such as `/manga` or `/manhwa`. Leave the title portion unchanged to use the library title.
-- `Check interval (hours)`: Hours between automatic checks for new chapters.
+- `Daily scan time`: One global time for checking every monitored series, configured in Settings. Defaults to 8:00 PM Eastern Time.
 - `Download all found chapters`: If enabled, all discovered chapters are queued immediately. If disabled, currently published chapters are scanned into the chapter list without downloading.
 - `Monitor new chapters`: If enabled, future scans queue newly discovered chapters automatically.
 

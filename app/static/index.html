@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="/static/branding/sakurarr-mark.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260924i" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260924j" />
   </head>
   <body>
     <main class="app-shell">
@@ -28,7 +28,7 @@
             <div class="brand-block">
               <div class="brand-logo" aria-label="Sakurarr">
                 <img src="/static/branding/sakurarr-mark.svg" alt="" />
-                <strong>Sakurarr</strong>
+                <strong>Sakur<span>arr</span></strong>
               </div>
               <div class="brand-copy">
                 <p>Manga in bloom.</p>
@@ -232,11 +232,16 @@
                 <div class="settings-section-heading">
                   <div>
                     <h3>Global defaults</h3>
-                    <p>Choose the default metadata service and naming template before per-series overrides are applied.</p>
+                    <p>Choose the daily scan time, default metadata service, and naming template.</p>
                   </div>
                 </div>
 
                 <form class="options-form" id="optionsForm">
+                  <label class="field-span">
+                    <span>Daily scan time (Eastern Time)</span>
+                    <input name="global_scan_time" type="time" required />
+                    <small class="field-hint">Every monitored series is checked once daily at this time. Default: 8:00 PM ET.</small>
+                  </label>
                   <label class="field-span">
                     <span>Default naming format</span>
                     <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />

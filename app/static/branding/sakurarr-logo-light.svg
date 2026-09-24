@@ -8,5 +8,5 @@
     <path d="M11 43c8 0 15 3 21 9 6-6 13-9 21-9v9c-8 0-15 2-21 7-6-5-13-7-21-7v-9Z" fill="#d76c91"/>
     <path d="M32 29v30" stroke="#f3f4f6" stroke-width="2.25" stroke-linecap="square"/>
   </g>
-  <text x="72" y="43" fill="#24262b" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="-1.2">Sakurarr</text>
+  <text x="72" y="43" fill="#24262b" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="-1.2"><tspan>Sakur</tspan><tspan fill="#d76c91">arr</tspan></text>
 </svg>
