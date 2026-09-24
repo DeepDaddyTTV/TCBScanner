@@ -123,7 +123,7 @@ def artwork_url_is_public(url: str) -> bool:
 SCHEDULER_POLL_SECONDS = scheduler_poll_seconds()
 LIBRARY_ROOTS = parse_library_roots()
 
-app = FastAPI(title="TCBScanner")
+app = FastAPI(title="KuraBloom")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 store = Store(DATA_DIR / "app.db")
@@ -293,7 +293,7 @@ async def get_settings() -> dict[str, Any]:
 @app.get("/api/meta")
 async def get_meta() -> dict[str, Any]:
     return {
-        "app_name": "TCBScanner",
+        "app_name": "KuraBloom",
         "version": APP_VERSION,
         "version_label": display_version(APP_VERSION),
         "supported_source_count": scraper.supported_source_count(),

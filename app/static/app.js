@@ -122,8 +122,8 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
-const themeKey = "tcbscanner-theme-v4";
-const legacyThemeKey = "tcbscanner-theme-v3";
+const themeKey = "kurabloom-theme-v1";
+const legacyThemeKey = "tcbscanner-theme-v4";
 const themeMediaQuery =
   typeof window.matchMedia === "function"
     ? window.matchMedia("(prefers-color-scheme: dark)")
@@ -2453,7 +2453,7 @@ function getVisibleChapters() {
 }
 
 function normalizeThemeChoice(theme) {
-  return ["light", "dark", "system"].includes(theme) ? theme : "light";
+  return ["light", "dark", "system"].includes(theme) ? theme : "dark";
 }
 
 function resolveThemeChoice(theme) {
@@ -2518,7 +2518,7 @@ function renderStatusStrip() {
 }
 
 function initTheme() {
-  const saved = localStorage.getItem(themeKey) || localStorage.getItem(legacyThemeKey) || "light";
+  const saved = localStorage.getItem(themeKey) || localStorage.getItem(legacyThemeKey) || "dark";
   const normalized = normalizeThemeChoice(saved);
   if (localStorage.getItem(legacyThemeKey) && !localStorage.getItem(themeKey)) {
     localStorage.setItem(themeKey, normalized);
@@ -2587,7 +2587,7 @@ function seriesMark(title) {
     .trim()
     .split(/\s+/)
     .filter(Boolean);
-  if (!parts.length) return "TCB";
+  if (!parts.length) return "KB";
   return parts
     .slice(0, 3)
     .map((part) => part[0])
@@ -3638,7 +3638,7 @@ document.addEventListener("click", (event) => {
 
 if (themeMediaQuery) {
   const handleThemeMediaChange = () => {
-    const selectedTheme = localStorage.getItem(themeKey) || "light";
+    const selectedTheme = localStorage.getItem(themeKey) || "dark";
     if (normalizeThemeChoice(selectedTheme) === "system") {
       setTheme("system");
     }

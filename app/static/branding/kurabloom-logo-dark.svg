@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 64" fill="none">
+  <title>KuraBloom dark-surface logo</title>
+  <g transform="translate(0 0)">
+    <path d="M31 31C21 30 14 24 11 15c9-1 17 4 21 13" fill="#f47fa7"/>
+    <path d="M33 31c10-1 17-7 20-16-9-1-17 4-21 13" fill="#f47fa7" opacity=".72"/>
+    <path d="M30 34c-9 1-15 6-18 14 8 2 15-1 20-10" fill="#f47fa7" opacity=".5"/>
+    <path d="M34 34c9 1 15 6 18 14-8 2-15-1-20-10" fill="#f47fa7" opacity=".3"/>
+    <path d="M11 43c8 0 15 3 21 9 6-6 13-9 21-9v9c-8 0-15 2-21 7-6-5-13-7-21-7v-9Z" fill="#f47fa7"/>
+    <path d="M32 29v30" stroke="#101114" stroke-width="2.25" stroke-linecap="square"/>
+  </g>
+  <text x="72" y="43" fill="#f3f5f7" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="-1.2">KuraBloom</text>
+</svg>
