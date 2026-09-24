@@ -95,7 +95,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -1477,7 +1478,8 @@ label span {
 input[type="text"],
 input[type="url"],
 input[type="number"],
-select {
+select,
+textarea {
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -1493,14 +1495,31 @@ select {
     background 0.18s ease;
 }
 
-input::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: rgba(182, 43, 36, 0.46);
   box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+textarea {
+  min-height: 86px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .toggle-line,
@@ -3078,12 +3097,19 @@ h3,
 input[type="text"],
 input[type="url"],
 input[type="number"],
-select {
+select,
+textarea {
   min-height: 44px;
-  padding: 0 12px;
   border-color: rgba(65, 52, 40, 0.16);
   background: rgba(255, 255, 255, 0.74);
   font-size: 0.95rem;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="number"],
+select {
+  padding: 0 12px;
 }
 
 .toggle-line {
@@ -3605,6 +3631,7 @@ input[type="text"],
 input[type="url"],
 input[type="number"],
 select,
+textarea,
 .toggle-line,
 .variable-item,
 .small-action,
@@ -4015,6 +4042,7 @@ select,
 :root[data-theme="dark"] input[type="url"],
 :root[data-theme="dark"] input[type="number"],
 :root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
 :root[data-theme="dark"] .filter-pill,
 :root[data-theme="dark"] .chapter-list-wrap,
 :root[data-theme="dark"] .chapter-action-button,

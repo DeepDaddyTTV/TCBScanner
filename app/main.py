@@ -134,6 +134,7 @@ monitor_task: asyncio.Task[None] | None = None
 class SeriesCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     source_url: str = Field(min_length=1, max_length=500)
+    backup_source_urls: list[str] = Field(default_factory=list, max_length=8)
     folder: str = Field(default="", max_length=240)
     check_interval_hours: float = Field(default=0.5, ge=0.5, le=168)
     naming_format: str | None = Field(default=None, max_length=180)
@@ -148,6 +149,22 @@ class SeriesCreate(BaseModel):
         if not cleaned.startswith(("http://", "https://")):
             raise ValueError("Enter a full http or https URL.")
         return cleaned
+
+    @field_validator("backup_source_urls")
+    @classmethod
+    def require_http_backup_urls(cls, values: list[str]) -> list[str]:
+        cleaned_urls: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            cleaned = str(value or "").strip()
+            if not cleaned.startswith(("http://", "https://")):
+                raise ValueError("Each backup source must be a full http or https URL.")
+            key = cleaned.rstrip("/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned_urls.append(cleaned)
+        return cleaned_urls
 
     @field_validator("title", "folder")
     @classmethod
@@ -307,6 +324,10 @@ async def import_library(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/series")
 async def create_series(payload: SeriesCreate) -> dict[str, Any]:
     data = payload.model_dump()
+    data["backup_source_urls"] = without_primary_source(
+        data["source_url"],
+        data.get("backup_source_urls", []),
+    )
     data["check_interval_minutes"] = int(round(float(data.pop("check_interval_hours")) * 60))
     if not data["folder"]:
         data["folder"] = data["title"]
@@ -320,6 +341,10 @@ async def update_series(series_id: int, payload: SeriesUpdate) -> dict[str, Any]
     if not store.get_series(series_id):
         raise HTTPException(status_code=404, detail="Series not found.")
     data = payload.model_dump()
+    data["backup_source_urls"] = without_primary_source(
+        data["source_url"],
+        data.get("backup_source_urls", []),
+    )
     data["check_interval_minutes"] = int(round(float(data.pop("check_interval_hours")) * 60))
     if not data["folder"]:
         data["folder"] = data["title"]
@@ -561,3 +586,12 @@ def display_version(value: str) -> str:
     if re.fullmatch(r"[0-9a-f]{40}", cleaned):
         return cleaned[:7]
     return cleaned
+
+
+def without_primary_source(primary_url: str, backup_urls: list[str]) -> list[str]:
+    primary_key = str(primary_url or "").strip().rstrip("/").lower()
+    return [
+        url
+        for url in backup_urls
+        if str(url or "").strip().rstrip("/").lower() != primary_key
+    ]

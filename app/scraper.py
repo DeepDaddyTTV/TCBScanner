@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -78,6 +79,7 @@ TCB_SITES = (
 )
 
 WORDPRESS_MANGA_SITES = (
+    {"name": "OP Chapters", "domain": "opchapters.com"},
     {"name": "Mangalink", "domain": "linkmanga.com"},
     {"name": "PAWMANGA", "domain": "pawmanga.com"},
     {"name": "Mangaclash", "domain": "toonclash.com"},
@@ -1935,6 +1937,11 @@ def parse_tcb_page_images(html: str, base_url: str) -> list[dict[str, object]]:
 
 
 def parse_wordpress_page_images(html: str, base_url: str) -> list[dict[str, object]]:
+    if host_matches(urlparse(base_url).netloc, "opchapters.com"):
+        reader_images = parse_opchapters_reader_images(html, base_url)
+        if reader_images:
+            return reader_images
+
     soup = BeautifulSoup(html, "lxml")
     selector = ", ".join(WORDPRESS_IMAGE_SELECTORS)
     image_nodes = soup.select(selector) or soup.find_all("img")
@@ -1983,6 +1990,40 @@ def parse_wordpress_page_images(html: str, base_url: str) -> list[dict[str, obje
         page.__dict__
         for page in sorted(images, key=lambda item: (item.page_number, item.url))
     ]
+
+
+def parse_opchapters_reader_images(html: str, base_url: str) -> list[dict[str, object]]:
+    match = re.search(
+        r"ts_reader\.run\((\{.*?\})\);\s*</script>",
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return []
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
+
+    for source in payload.get("sources", []):
+        if not isinstance(source, dict) or not isinstance(source.get("images"), list):
+            continue
+        pages: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for page_number, raw_url in enumerate(source["images"], start=1):
+            url = normalize_url(urljoin(base_url, str(raw_url or "").strip()))
+            if not url or url in seen:
+                continue
+            path = urlparse(url).path.lower()
+            if not re.search(r"\.(?:jpg|jpeg|png|webp|gif)$", path):
+                continue
+            seen.add(url)
+            pages.append(
+                PageImage(url, page_number, extension_from_url(url)).__dict__
+            )
+        if pages:
+            return pages
+    return []
 
 
 def parse_today_book_page_images(html: str, base_url: str) -> list[dict[str, object]]:

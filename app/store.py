@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import threading
@@ -14,7 +15,42 @@ def utc_now() -> str:
 
 DEFAULT_NAMING_FORMAT = "{ChapterFullTitle}"
 LEGACY_DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
+
+
+def normalize_backup_source_urls(value: Any) -> list[str]:
+    raw_items: list[Any]
+    if isinstance(value, list):
+        raw_items = value
+    elif isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            raw_items = []
+        else:
+            try:
+                decoded = json.loads(cleaned)
+            except json.JSONDecodeError:
+                decoded = re.split(r"[\n,;]+", cleaned)
+            raw_items = decoded if isinstance(decoded, list) else [decoded]
+    elif value is None:
+        raw_items = []
+    else:
+        raw_items = [value]
+
+    urls: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        url = str(item or "").strip()
+        key = url.rstrip("/").lower()
+        if not url or key in seen:
+            continue
+        seen.add(key)
+        urls.append(url)
+    return urls
+
+
+def serialize_backup_source_urls(value: Any) -> str:
+    return json.dumps(normalize_backup_source_urls(value), separators=(",", ":"))
 
 
 class Store:
@@ -80,6 +116,11 @@ class Store:
             )
             self._ensure_column("series", "naming_format", "TEXT")
             self._ensure_column("series", "poster_image_url", "TEXT")
+            self._ensure_column(
+                "series",
+                "backup_source_urls",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO settings (key, value)
@@ -108,9 +149,10 @@ class Store:
                 """
                 INSERT INTO series (
                     title, source_url, folder, check_interval_minutes,
-                    enabled, backfill_existing, initialized, created_at, naming_format, poster_image_url
+                    enabled, backfill_existing, initialized, created_at, naming_format,
+                    poster_image_url, backup_source_urls
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
                 """,
                 (
                     payload["title"],
@@ -122,6 +164,7 @@ class Store:
                     now,
                     payload.get("naming_format") or None,
                     payload.get("poster_image_url") or None,
+                    serialize_backup_source_urls(payload.get("backup_source_urls")),
                 ),
             )
             series_id = int(cur.lastrowid)
@@ -140,7 +183,8 @@ class Store:
                     enabled = ?,
                     backfill_existing = ?,
                     naming_format = ?,
-                    poster_image_url = ?
+                    poster_image_url = ?,
+                    backup_source_urls = ?
                 WHERE id = ?
                 """,
                 (
@@ -152,6 +196,7 @@ class Store:
                     1 if payload.get("backfill_existing", False) else 0,
                     payload.get("naming_format") or None,
                     payload.get("poster_image_url") or None,
+                    serialize_backup_source_urls(payload.get("backup_source_urls")),
                     series_id,
                 ),
             )
@@ -218,12 +263,14 @@ class Store:
                     SUM(CASE WHEN c.status = 'skipped' THEN 1 ELSE 0 END) AS skipped_count
                 FROM series s
                 LEFT JOIN chapters c ON c.series_id = s.id
-                WHERE lower(s.title) LIKE ? OR lower(s.source_url) LIKE ?
+                WHERE lower(s.title) LIKE ?
+                   OR lower(s.source_url) LIKE ?
+                   OR lower(s.backup_source_urls) LIKE ?
                 GROUP BY s.id
                 ORDER BY s.created_at DESC
                 LIMIT ?
                 """,
-                (like, like, max(1, limit * 4)),
+                (like, like, like, max(1, limit * 4)),
             ).fetchall()
 
         ranked = sorted(
@@ -320,6 +367,46 @@ class Store:
         now = utc_now()
         with self._lock, self._conn:
             for chapter in chapters:
+                source_url = str(chapter["url"])
+                chapter_key = str(chapter["chapter_key"])
+                existing = self._conn.execute(
+                    """
+                    SELECT * FROM chapters
+                    WHERE series_id = ? AND chapter_key = ?
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (series_id, chapter_key),
+                ).fetchone()
+                if existing:
+                    existing_url = str(existing["source_url"] or "")
+                    replacement = self._conn.execute(
+                        """
+                        SELECT id FROM chapters
+                        WHERE series_id = ? AND source_url = ? AND id != ?
+                        LIMIT 1
+                        """,
+                        (series_id, source_url, int(existing["id"])),
+                    ).fetchone()
+                    if not replacement:
+                        recovered = existing["status"] == "failed" and source_url != existing_url
+                        self._conn.execute(
+                            """
+                            UPDATE chapters
+                            SET source_url = ?, sort_key = ?, display_title = ?,
+                                status = ?, error = ?
+                            WHERE id = ?
+                            """,
+                            (
+                                source_url,
+                                float(chapter.get("sort_key") or 0),
+                                chapter["title"],
+                                "pending" if recovered else existing["status"],
+                                None if recovered else existing["error"],
+                                int(existing["id"]),
+                            ),
+                        )
+                    continue
                 cur = self._conn.execute(
                     """
                     INSERT OR IGNORE INTO chapters (
@@ -330,8 +417,8 @@ class Store:
                     """,
                     (
                         series_id,
-                        chapter["url"],
-                        chapter["chapter_key"],
+                        source_url,
+                        chapter_key,
                         float(chapter.get("sort_key") or 0),
                         chapter["title"],
                         status_for_new,
@@ -612,9 +699,10 @@ class Store:
                     INSERT INTO series (
                         id, title, source_url, folder, check_interval_minutes,
                         enabled, backfill_existing, initialized, created_at,
-                        last_checked_at, last_error, naming_format, poster_image_url
+                        last_checked_at, last_error, naming_format, poster_image_url,
+                        backup_source_urls
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -631,6 +719,7 @@ class Store:
                             row["last_error"],
                             row["naming_format"],
                             row.get("poster_image_url"),
+                            serialize_backup_source_urls(row.get("backup_source_urls")),
                         )
                         for row in snapshot["series"]
                     ],
@@ -818,6 +907,9 @@ class Store:
                     "last_error": self._optional_text(row.get("last_error")),
                     "naming_format": self._optional_compact_text(row.get("naming_format")),
                     "poster_image_url": self._optional_text(row.get("poster_image_url")),
+                    "backup_source_urls": normalize_backup_source_urls(
+                        row.get("backup_source_urls", [])
+                    ),
                 }
             )
         return normalized
@@ -987,6 +1079,10 @@ class Store:
         ):
             if key in data and data[key] is None:
                 data[key] = 0
+        if "backup_source_urls" in data:
+            data["backup_source_urls"] = normalize_backup_source_urls(
+                data["backup_source_urls"]
+            )
         return data
 
 

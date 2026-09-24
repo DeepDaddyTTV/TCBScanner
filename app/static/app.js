@@ -348,6 +348,7 @@ function defaultSeriesDraft(overrides = {}) {
   return {
     title: "",
     source_url: "",
+    backup_source_urls: "",
     folder: "",
     check_interval_hours: "0.5",
     naming_format: "",
@@ -364,6 +365,7 @@ function seriesToDraft(series) {
   return defaultSeriesDraft({
     title: String(series.title || ""),
     source_url: String(series.source_url || ""),
+    backup_source_urls: normalizeBackupSourceUrls(series.backup_source_urls).join("\n"),
     folder: String(series.folder || ""),
     check_interval_hours: String(Math.max(0.5, Number(series.check_interval_minutes || 30) / 60)),
     naming_format: String(series.naming_format || ""),
@@ -428,6 +430,9 @@ function buildSeriesFromDraft(draft, fallback = {}) {
     ...fallback,
     title: String(readDraftValue(draft, "title", fallback.title || "")),
     source_url: String(readDraftValue(draft, "source_url", fallback.source_url || fallback.url || "")),
+    backup_source_urls: normalizeBackupSourceUrls(
+      readDraftValue(draft, "backup_source_urls", fallback.backup_source_urls || []),
+    ),
     folder: String(readDraftValue(draft, "folder", fallback.folder || fallback.title || "")),
     check_interval_minutes: Math.max(30, Math.round(intervalHours * 60)),
     naming_format: String(readDraftValue(draft, "naming_format", fallback.naming_format || "")),
@@ -449,6 +454,7 @@ function getPreviewSeries() {
   return buildSeriesFromDraft(state.discoverDraft, {
     title: state.searchPreview.title || "",
     source_url: state.searchPreview.url || "",
+    backup_source_urls: [],
     folder: state.searchPreview.title || "",
     check_interval_minutes: 30,
     naming_format: "",
@@ -1262,6 +1268,15 @@ function renderChaptersSidebar(selected) {
 }
 
 function renderDetailsSidebar(selected) {
+  const backupSources = normalizeBackupSourceUrls(selected.backup_source_urls);
+  const backupSourceSummary = backupSources.length
+    ? backupSources
+        .map(
+          (sourceUrl) =>
+            `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(sourceUrl)}</a>`,
+        )
+        .join("<br />")
+    : "None configured";
   return `
     <div class="panel-heading">
       <div>
@@ -1273,6 +1288,7 @@ function renderDetailsSidebar(selected) {
     <div class="sidebar-detail-list">
       ${sidebarDetailRow("Library title", selected.title)}
       ${sidebarDetailRow("Source URL", `<a href="${escapeHtml(selected.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(selected.source_url)}</a>`)}
+      ${sidebarDetailRow("Backup sources", backupSourceSummary)}
       ${sidebarDetailRow("Save folder", escapeHtml(formatFolderDisplay(selected.folder || selected.title)))}
       ${sidebarDetailRow("Check interval", escapeHtml(formatCadence(selected.check_interval_minutes)))}
       ${sidebarDetailRow("Naming format", escapeHtml(getNamingPreview(selected)))}
@@ -1559,6 +1575,11 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
       <label class="field-span">
         <span>Source URL</span>
         <input name="source_url" type="url" required value="${escapeHtml(safeDraft.source_url)}" placeholder="https://example.com/manga" />
+      </label>
+      <label class="field-span">
+        <span>Backup source URLs</span>
+        <textarea name="backup_source_urls" rows="3" placeholder="One supported series URL per line">${escapeHtml(normalizeBackupSourceUrls(safeDraft.backup_source_urls).join("\n"))}</textarea>
+        <small class="field-hint">Checked in order when the primary source cannot be reached or parsed.</small>
       </label>
       <label class="field-span">
         <span>Library title</span>
@@ -2724,6 +2745,7 @@ function readSeriesFormPayload(form) {
   const formData = new FormData(form);
   return {
     source_url: String(formData.get("source_url") || "").trim(),
+    backup_source_urls: normalizeBackupSourceUrls(formData.get("backup_source_urls")),
     title: String(formData.get("title") || "").trim(),
     folder: String(formData.get("folder") || "").trim(),
     check_interval_hours: Number(formData.get("check_interval_hours") || 0.5),
@@ -2736,14 +2758,30 @@ function readSeriesFormPayload(form) {
 function normalizeSeriesPayload(payload) {
   return {
     ...payload,
+    backup_source_urls: normalizeBackupSourceUrls(payload.backup_source_urls),
     naming_format: payload.naming_format || null,
   };
+}
+
+function normalizeBackupSourceUrls(value) {
+  const items = Array.isArray(value) ? value : String(value || "").split(/[\n,;]+/);
+  const seen = new Set();
+  return items
+    .map((item) => String(item || "").trim())
+    .filter((item) => {
+      if (!item) return false;
+      const key = item.replace(/\/+$/, "").toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function syncDraftFromPayload(payload, mode) {
   const draft = defaultSeriesDraft({
     title: payload.title,
     source_url: payload.source_url,
+    backup_source_urls: normalizeBackupSourceUrls(payload.backup_source_urls).join("\n"),
     folder: payload.folder,
     check_interval_hours: String(payload.check_interval_hours || "0.5"),
     naming_format: payload.naming_format || "",

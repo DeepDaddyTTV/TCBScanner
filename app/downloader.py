@@ -6,6 +6,7 @@ import shutil
 import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -38,8 +39,8 @@ class MangaDownloader:
             return
         self.store.record_check_start(series_id)
         try:
-            source_url, chapters = await self._discover_chapters(series["source_url"])
-            if source_url != series["source_url"]:
+            source_url, chapters, source_index = await self._discover_series_chapters(series)
+            if source_index == 0 and source_url != series["source_url"]:
                 self.store.update_series_source(series_id, source_url)
                 self.store.add_event(series_id, None, "info", "Resolved chapter URL to series page.")
 
@@ -89,6 +90,48 @@ class MangaDownloader:
         if not scraper.host_is_supported(source_url):
             raise ValueError("This site is not in the current supported source list.")
         return await scraper.discover_chapters(source_url, request_delay=self.request_delay)
+
+    async def _discover_series_chapters(
+        self,
+        series: dict[str, Any],
+    ) -> tuple[str, list[dict[str, object]], int]:
+        primary_url = str(series.get("source_url") or "").strip()
+        backup_urls = [
+            str(url).strip()
+            for url in series.get("backup_source_urls", [])
+            if str(url).strip()
+        ]
+        candidates = [primary_url, *backup_urls]
+        failures: list[str] = []
+
+        for index, source_url in enumerate(candidates):
+            try:
+                resolved_url, chapters = await self._discover_chapters(source_url)
+            except Exception as exc:  # noqa: BLE001 - try the next configured source
+                host = urlparse(source_url).netloc or source_url
+                failures.append(f"{host}: {exc}")
+                if index < len(candidates) - 1:
+                    next_host = urlparse(candidates[index + 1]).netloc or candidates[index + 1]
+                    self.store.add_event(
+                        int(series["id"]),
+                        None,
+                        "warning",
+                        f"Source {host} failed; checking backup {next_host}.",
+                    )
+                continue
+
+            if index > 0:
+                used_host = urlparse(source_url).netloc or source_url
+                self.store.add_event(
+                    int(series["id"]),
+                    None,
+                    "info",
+                    f"Using backup source {used_host} for this check.",
+                )
+            return resolved_url, chapters, index
+
+        detail = "; ".join(failures) or "No source URLs are configured."
+        raise RuntimeError(f"All configured sources failed. {detail}")
 
     async def _download_chapter(self, series: dict[str, Any], chapter: dict[str, Any]) -> None:
         chapter_id = int(chapter["id"])

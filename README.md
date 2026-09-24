@@ -20,8 +20,10 @@ services:
     volumes:
       - ./data:/data
       - ./manga:/manga
+      - ./manhwa:/manhwa
     environment:
       TZ: "America/New_York"
+      LIBRARY_DIRS: "/manga,/manhwa"
 ```
 
 Clone and start the container:
@@ -51,7 +53,8 @@ Compose settings:
 - `user`: Runs the container as `root` by default so mounted manga folders can be written even when the host folder owner does not match a container user.
 - `ports`: Maps the host web port to the container web port. `18080:8080` makes the app available at `http://localhost:18080`.
 - `./data:/data`: Stores the SQLite database and temporary download work files.
-- `./manga:/manga`: Stores finished CBZ files. Change the left side to attach an existing manga library, for example `D:/Manga:/manga` or `/srv/manga:/manga`.
+- `./manga:/manga`: Stores finished manga CBZ files. Change the left side to attach an existing manga library, for example `D:/Manga:/manga` or `/srv/manga:/manga`.
+- `./manhwa:/manhwa`: Stores finished manhwa CBZ files in a separate library root.
 - `TZ`: Time zone used by the container for logs and scheduled checks.
 
 Supported environment variables:
@@ -59,6 +62,7 @@ Supported environment variables:
 - `TZ`: Time zone used by the container for logs and scheduled checks. Default: Docker image default if unset.
 - `DATA_DIR`: Container path for the database and state files. Default: `/data`.
 - `LIBRARY_DIR`: Container path where finished CBZ files are written. Default: `/manga`.
+- `LIBRARY_DIRS`: Comma-separated list of selectable library roots. Use `/manga,/manhwa` to keep manga and manhwa separate. When set, it takes precedence over `LIBRARY_DIR`.
 - `WORK_DIR`: Container path for temporary image downloads before packaging. Default: `/data/work`.
 - `TCB_SCHEDULER_INTERVAL_HOURS`: How often the background scheduler wakes up to look for due series, in hours. Default: `1`.
 - `TCB_REQUEST_DELAY`: Delay between source requests, in seconds. Default: `0.8`.
@@ -68,11 +72,12 @@ Downloads interrupted by a container or host restart are automatically returned 
 
 ## Supported Sites
 
-The current release supports 29 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.
+The current release supports 30 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.
 
 | Site | Domain | Provider family |
 | --- | --- | --- |
 | [TCB One Piece Chapters](https://tcbonepiecechapters.com/) | `tcbonepiecechapters.com` | Custom TCB HTML |
+| [OP Chapters](https://opchapters.com/manga/one-piece/) | `opchapters.com` | WordPress-style manga HTML |
 | [Mangalink](https://linkmanga.com/) | `linkmanga.com` | WordPress-style manga HTML |
 | [PAWMANGA](https://pawmanga.com/) | `pawmanga.com` | WordPress-style manga HTML |
 | [Mangaclash](https://toonclash.com/) | `toonclash.com` | WordPress-style manga HTML |
@@ -134,8 +139,10 @@ You can also paste a chapter URL; the app will try to resolve it back to the par
 
 Fields:
 
+- `Source URL`: Primary series page checked first.
+- `Backup source URLs`: Optional alternate supported series pages, one per line, checked in order when the primary source cannot be reached or parsed.
 - `Library title`: Used for chapter file names when the source title is missing.
-- `Folder`: Relative folder under `/manga`. Leave it blank to use the library title.
+- `Folder`: Select a destination under a configured root such as `/manga` or `/manhwa`. Leave the title portion unchanged to use the library title.
 - `Check interval (hours)`: Hours between automatic checks for new chapters.
 - `Download all found chapters`: If enabled, all discovered chapters are queued immediately. If disabled, currently published chapters are scanned into the chapter list without downloading.
 - `Monitor new chapters`: If enabled, future scans queue newly discovered chapters automatically.
