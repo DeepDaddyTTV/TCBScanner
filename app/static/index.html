@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="/static/branding/sakurarr-mark.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260924j" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260924k" />
   </head>
   <body>
     <main class="app-shell">
@@ -89,10 +89,6 @@
 
         <header class="panel command-bar">
           <div class="command-primary">
-            <button class="toolbar-text-button refresh-button" id="refreshAll" title="Refresh dashboard" aria-label="Refresh dashboard">
-              <span class="ui-icon ui-icon-refresh" aria-hidden="true"></span>
-              <span>Refresh now</span>
-            </button>
             <div class="command-copy">
               <h2>Chapter queue</h2>
               <p id="shellStatus">Loading scanner state…</p>
@@ -106,6 +102,10 @@
             </div>
 
             <div class="topbar-actions">
+              <button class="toolbar-text-button refresh-button" id="refreshAll" title="Refresh dashboard" aria-label="Refresh dashboard">
+                <span class="ui-icon ui-icon-refresh" aria-hidden="true"></span>
+                <span>Refresh now</span>
+              </button>
               <button class="toolbar-text-button" id="optionsToggle" title="Global options" aria-label="Global options" aria-expanded="false" aria-controls="settingsDrawer">
                 <span class="ui-icon ui-icon-settings" aria-hidden="true"></span>
                 <span>Settings</span>
