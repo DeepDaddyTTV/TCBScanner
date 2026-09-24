@@ -14,6 +14,10 @@ from . import scraper
 from .store import Store
 
 
+class DownloadCancelled(Exception):
+    pass
+
+
 class MangaDownloader:
     def __init__(
         self,
@@ -29,6 +33,7 @@ class MangaDownloader:
         self.work_dir = work_dir
         self.request_delay = request_delay
         self._download_lock = asyncio.Lock()
+        self._cancelled_series: set[int] = set()
         for library_root in self.library_roots or [self.primary_library_dir]:
             library_root.mkdir(parents=True, exist_ok=True)
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -80,11 +85,25 @@ class MangaDownloader:
 
     async def download_pending(self, series_id: int) -> None:
         async with self._download_lock:
+            if series_id in self._cancelled_series:
+                return
             series = self.store.get_series(series_id)
             if not series:
                 return
             for chapter in self.store.pending_chapters(series_id):
+                if series_id in self._cancelled_series:
+                    break
                 await self._download_chapter(series, chapter)
+
+    def request_cancel(self, series_id: int) -> None:
+        self._cancelled_series.add(series_id)
+
+    def clear_cancel(self, series_id: int) -> None:
+        self._cancelled_series.discard(series_id)
+
+    def _raise_if_cancelled(self, series_id: int) -> None:
+        if series_id in self._cancelled_series:
+            raise DownloadCancelled("Series download canceled for reset.")
 
     async def _discover_chapters(self, source_url: str) -> tuple[str, list[dict[str, object]]]:
         if not scraper.host_is_supported(source_url):
@@ -178,6 +197,7 @@ class MangaDownloader:
         return selected_url, chapters, selected_index
 
     async def _download_chapter(self, series: dict[str, Any], chapter: dict[str, Any]) -> None:
+        series_id = int(series["id"])
         chapter_id = int(chapter["id"])
         self.store.set_chapter_status(chapter_id, "downloading", error=None)
         self.store.add_event(
@@ -193,6 +213,7 @@ class MangaDownloader:
             staging_dir.mkdir(parents=True, exist_ok=True)
 
             await asyncio.sleep(self.request_delay)
+            self._raise_if_cancelled(series_id)
             images = await scraper.discover_page_images(
                 str(chapter["source_url"]),
                 request_delay=self.request_delay,
@@ -204,10 +225,12 @@ class MangaDownloader:
             width = max(3, len(str(len(images))))
             for index, image in enumerate(images, start=1):
                 await asyncio.sleep(self.request_delay)
+                self._raise_if_cancelled(series_id)
                 content, content_type = await scraper.fetch_bytes(
                     str(image["url"]),
                     referer=str(chapter["source_url"]),
                 )
+                self._raise_if_cancelled(series_id)
                 extension = scraper.extension_from_content_type(
                     content_type,
                     str(image.get("extension_hint") or "jpg"),
@@ -236,6 +259,14 @@ class MangaDownloader:
                 chapter_id,
                 "info",
                 f"Packaged {len(image_paths)} page(s) into {destination.name}.",
+            )
+        except DownloadCancelled:
+            self.store.set_chapter_status(chapter_id, "pending", error=None)
+            self.store.add_event(
+                series_id,
+                chapter_id,
+                "info",
+                f"Canceled {chapter['display_title']} for series reset.",
             )
         except (httpx.HTTPError, OSError, ValueError) as exc:
             self.store.set_chapter_status(chapter_id, "failed", error=str(exc))

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from app.downloader import MangaDownloader, source_chapter_set_conflicts
+from app.downloader import DownloadCancelled, MangaDownloader, source_chapter_set_conflicts
 from app.store import Store
 
 
@@ -114,6 +114,22 @@ class BackupSourceStoreTests(unittest.TestCase):
 
 
 class BackupSourceDownloaderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_series_download_can_be_cancelled_for_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = Store(root / "app.db")
+            downloader = MangaDownloader(
+                store,
+                library_roots=[root / "manga"],
+                work_dir=root / "work",
+                request_delay=0.2,
+            )
+            downloader.request_cancel(8)
+            with self.assertRaises(DownloadCancelled):
+                downloader._raise_if_cancelled(8)
+            downloader.clear_cancel(8)
+            downloader._raise_if_cancelled(8)
+
     async def test_check_falls_back_to_backup_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

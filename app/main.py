@@ -487,42 +487,57 @@ async def reset_series(series_id: int, payload: SeriesReset) -> dict[str, Any]:
     if not series:
         raise HTTPException(status_code=404, detail="Series not found.")
     chapters = store.list_chapters(series_id)
-    if any(chapter.get("status") == "downloading" for chapter in chapters):
-        raise HTTPException(
-            status_code=409,
-            detail="Wait for active chapter downloads to finish before resetting this series.",
-        )
+    cancellation_requested = any(
+        chapter.get("status") == "downloading" for chapter in chapters
+    )
+    if cancellation_requested:
+        downloader.request_cancel(series_id)
+        for _ in range(450):
+            await asyncio.sleep(0.1)
+            chapters = store.list_chapters(series_id)
+            if not any(chapter.get("status") == "downloading" for chapter in chapters):
+                break
+        else:
+            downloader.clear_cancel(series_id)
+            raise HTTPException(
+                status_code=409,
+                detail="The active download did not stop in time. Try the reset again.",
+            )
 
     deleted_files = 0
     missing_files = 0
-    if payload.delete_files:
-        file_paths = {
-            Path(str(chapter.get("cbz_path") or "").strip())
-            for chapter in chapters
-            if str(chapter.get("cbz_path") or "").strip()
-        }
-        for file_path in file_paths:
-            if file_path.suffix.lower() != ".cbz" or not path_within_library_roots(file_path):
-                raise HTTPException(
-                    status_code=400,
-                    detail="A recorded chapter file is outside the configured library roots.",
-                )
-        for file_path in file_paths:
-            try:
-                file_path.unlink()
-                deleted_files += 1
-            except FileNotFoundError:
-                missing_files += 1
-            except OSError as exc:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Unable to delete {file_path.name}.",
-                ) from exc
-
     try:
-        removed_records = store.reset_series(series_id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if payload.delete_files:
+            file_paths = {
+                Path(str(chapter.get("cbz_path") or "").strip())
+                for chapter in chapters
+                if str(chapter.get("cbz_path") or "").strip()
+            }
+            for file_path in file_paths:
+                if file_path.suffix.lower() != ".cbz" or not path_within_library_roots(file_path):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="A recorded chapter file is outside the configured library roots.",
+                    )
+            for file_path in file_paths:
+                try:
+                    file_path.unlink()
+                    deleted_files += 1
+                except FileNotFoundError:
+                    missing_files += 1
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Unable to delete {file_path.name}.",
+                    ) from exc
+
+        try:
+            removed_records = store.reset_series(series_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        if cancellation_requested:
+            downloader.clear_cancel(series_id)
     if payload.rescan:
         schedule_check(series_id)
     return {
