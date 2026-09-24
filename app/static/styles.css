@@ -4738,6 +4738,67 @@ textarea,
   line-height: 1.55;
 }
 
+.catalog-match {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.catalog-current {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-left: 3px solid var(--muted);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.catalog-current.matched {
+  border-left-color: var(--teal);
+}
+
+.catalog-current a,
+.catalog-current span,
+.catalog-result span {
+  color: var(--muted);
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.catalog-results {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.catalog-result {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.42);
+  color: var(--ink);
+  text-align: left;
+}
+
+.catalog-result:hover,
+.catalog-result:focus-visible {
+  border-color: rgba(182, 43, 36, 0.38);
+  outline: none;
+}
+
+.danger-zone {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
+}
+
+.danger-zone .danger-action {
+  width: 100%;
+  min-height: 42px;
+}
+
 .settings-drawer .options-form {
   margin-top: 0;
   align-content: start;
@@ -4909,9 +4970,16 @@ textarea,
 }
 
 :root[data-theme="dark"] .settings-section,
+:root[data-theme="dark"] .catalog-match,
 :root[data-theme="dark"] .supported-site-group {
   border-color: rgba(255, 245, 232, 0.12);
   background: rgba(255, 255, 255, 0.03);
+}
+
+:root[data-theme="dark"] .catalog-current,
+:root[data-theme="dark"] .catalog-result {
+  border-color: rgba(255, 245, 232, 0.12);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 :root[data-theme="dark"] .supported-site-link {

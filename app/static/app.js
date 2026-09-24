@@ -70,12 +70,17 @@ const state = {
     version_label: "0.2.0",
     supported_source_count: 0,
     supported_sources: [],
+    metadata_providers: [
+      { id: "anilist", name: "AniList" },
+      { id: "mangaupdates", name: "MangaUpdates" },
+    ],
   },
   selectedSeriesId: null,
   chapters: [],
   selectedChapterIds: new Set(),
   settings: {
     default_naming_format: "{ChapterFullTitle}",
+    default_metadata_provider: "anilist",
     variables: [],
     kavita_url: "",
     komga_url: "",
@@ -111,6 +116,9 @@ const state = {
   posterPickerSeriesId: null,
   posterChoices: [],
   posterChoicesLoading: false,
+  catalogMatches: [],
+  catalogSearching: false,
+  catalogMessage: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -349,6 +357,12 @@ function defaultSeriesDraft(overrides = {}) {
     title: "",
     source_url: "",
     backup_source_urls: "",
+    metadata_provider: "",
+    metadata_provider_override: "",
+    metadata_id: "",
+    metadata_title: "",
+    metadata_url: "",
+    metadata_chapter_count: "",
     folder: "",
     check_interval_hours: "0.5",
     naming_format: "",
@@ -366,6 +380,12 @@ function seriesToDraft(series) {
     title: String(series.title || ""),
     source_url: String(series.source_url || ""),
     backup_source_urls: normalizeBackupSourceUrls(series.backup_source_urls).join("\n"),
+    metadata_provider: String(series.metadata_provider || ""),
+    metadata_provider_override: String(series.metadata_provider_override || ""),
+    metadata_id: String(series.metadata_id || ""),
+    metadata_title: String(series.metadata_title || ""),
+    metadata_url: String(series.metadata_url || ""),
+    metadata_chapter_count: String(series.metadata_chapter_count || ""),
     folder: String(series.folder || ""),
     check_interval_hours: String(Math.max(0.5, Number(series.check_interval_minutes || 30) / 60)),
     naming_format: String(series.naming_format || ""),
@@ -388,6 +408,10 @@ function ensureEditDraft(force = false) {
     state.editDraftSeriesId !== selected.id ||
     !state.editDraftDirty
   ) {
+    if (force || state.editDraftSeriesId !== selected.id) {
+      state.catalogMatches = [];
+      state.catalogMessage = "";
+    }
     state.editDraft = seriesToDraft(selected);
     state.editDraftSeriesId = selected.id;
     state.editDraftDirty = false;
@@ -408,6 +432,8 @@ function setFocusTab(tab) {
 
 function resetDiscoverDraft(overrides = {}) {
   state.discoverDraft = defaultSeriesDraft(overrides);
+  state.catalogMatches = [];
+  state.catalogMessage = "";
 }
 
 function readDraftValue(draft, key, fallback) {
@@ -433,6 +459,22 @@ function buildSeriesFromDraft(draft, fallback = {}) {
     backup_source_urls: normalizeBackupSourceUrls(
       readDraftValue(draft, "backup_source_urls", fallback.backup_source_urls || []),
     ),
+    metadata_provider: String(readDraftValue(draft, "metadata_provider", fallback.metadata_provider || "")),
+    metadata_provider_override: String(
+      readDraftValue(
+        draft,
+        "metadata_provider_override",
+        fallback.metadata_provider_override || "",
+      ),
+    ),
+    metadata_id: String(readDraftValue(draft, "metadata_id", fallback.metadata_id || "")),
+    metadata_title: String(readDraftValue(draft, "metadata_title", fallback.metadata_title || "")),
+    metadata_url: String(readDraftValue(draft, "metadata_url", fallback.metadata_url || "")),
+    metadata_chapter_count: readDraftValue(
+      draft,
+      "metadata_chapter_count",
+      fallback.metadata_chapter_count || null,
+    ) || null,
     folder: String(readDraftValue(draft, "folder", fallback.folder || fallback.title || "")),
     check_interval_minutes: Math.max(30, Math.round(intervalHours * 60)),
     naming_format: String(readDraftValue(draft, "naming_format", fallback.naming_format || "")),
@@ -455,6 +497,12 @@ function getPreviewSeries() {
     title: state.searchPreview.title || "",
     source_url: state.searchPreview.url || "",
     backup_source_urls: [],
+    metadata_provider: "",
+    metadata_provider_override: "",
+    metadata_id: "",
+    metadata_title: "",
+    metadata_url: "",
+    metadata_chapter_count: null,
     folder: state.searchPreview.title || "",
     check_interval_minutes: 30,
     naming_format: "",
@@ -688,6 +736,10 @@ function renderSettings() {
   const komgaInput = optionsForm?.elements.komga_url;
   if (komgaInput && document.activeElement !== komgaInput) {
     komgaInput.value = state.settings.komga_url || "";
+  }
+  const metadataProviderInput = optionsForm?.elements.default_metadata_provider;
+  if (metadataProviderInput && document.activeElement !== metadataProviderInput) {
+    metadataProviderInput.value = state.settings.default_metadata_provider || "anilist";
   }
 
   const variables = $("#namingVariables");
@@ -1267,6 +1319,20 @@ function renderChaptersSidebar(selected) {
   `;
 }
 
+function catalogProviderName(provider) {
+  const normalized = String(provider || "anilist").toLowerCase();
+  const configured = (state.meta.metadata_providers || []).find((item) => item.id === normalized);
+  if (configured?.name) return configured.name;
+  return normalized === "mangaupdates" ? "MangaUpdates" : "AniList";
+}
+
+function catalogFallbackUrl(provider, id) {
+  if (String(provider || "").toLowerCase() === "anilist") {
+    return `https://anilist.co/manga/${id}`;
+  }
+  return "";
+}
+
 function renderDetailsSidebar(selected) {
   const backupSources = normalizeBackupSourceUrls(selected.backup_source_urls);
   const backupSourceSummary = backupSources.length
@@ -1289,6 +1355,12 @@ function renderDetailsSidebar(selected) {
       ${sidebarDetailRow("Library title", selected.title)}
       ${sidebarDetailRow("Source URL", `<a href="${escapeHtml(selected.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(selected.source_url)}</a>`)}
       ${sidebarDetailRow("Backup sources", backupSourceSummary)}
+      ${sidebarDetailRow(
+        "Metadata match",
+        selected.metadata_id
+          ? `<a href="${escapeHtml(selected.metadata_url || catalogFallbackUrl(selected.metadata_provider, selected.metadata_id))}" target="_blank" rel="noreferrer">${escapeHtml(selected.metadata_title || `${catalogProviderName(selected.metadata_provider)} #${selected.metadata_id}`)}</a>`
+          : "Not matched",
+      )}
       ${sidebarDetailRow("Save folder", escapeHtml(formatFolderDisplay(selected.folder || selected.title)))}
       ${sidebarDetailRow("Check interval", escapeHtml(formatCadence(selected.check_interval_minutes)))}
       ${sidebarDetailRow("Naming format", escapeHtml(getNamingPreview(selected)))}
@@ -1487,6 +1559,28 @@ function renderSeriesSettingsSidebar(selected) {
       submitIcon: icons.check,
     })}
     ${renderPosterPicker(selected)}
+    ${renderSeriesDangerZone(selected)}
+  `;
+}
+
+function renderSeriesDangerZone(selected) {
+  return `
+    <section class="settings-section danger-zone">
+      <div class="settings-section-heading">
+        <div>
+          <h3>Reset chapter index</h3>
+          <p>Clear every indexed chapter and error for ${escapeHtml(selected.title)}, then rescan the current primary and backup sources.</p>
+        </div>
+      </div>
+      <label class="toggle-line">
+        <input id="resetDeleteFiles" type="checkbox" />
+        <span>Also permanently delete downloaded CBZ files recorded for this series</span>
+      </label>
+      <button class="small-action danger-action" type="button" data-sidebar-action="reset-series">
+        ${icons.retry}
+        <span>Clear index and rescan</span>
+      </button>
+    </section>
   `;
 }
 
@@ -1579,12 +1673,13 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
       <label class="field-span">
         <span>Backup source URLs</span>
         <textarea name="backup_source_urls" rows="3" placeholder="One supported series URL per line">${escapeHtml(normalizeBackupSourceUrls(safeDraft.backup_source_urls).join("\n"))}</textarea>
-        <small class="field-hint">Checked in order when the primary source cannot be reached or parsed.</small>
+        <small class="field-hint">Fill missing chapters and take over when the primary source fails.</small>
       </label>
       <label class="field-span">
         <span>Library title</span>
         <input name="title" type="text" required value="${escapeHtml(safeDraft.title)}" placeholder="e.g. My Hero Academia" />
       </label>
+      ${renderCatalogMatcher(safeDraft)}
       <label class="field-span">
         <span>Save Folder</span>
         <span class="select-shell">
@@ -1628,6 +1723,79 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
         <span>${escapeHtml(submitLabel)}</span>
       </button>
     </form>
+  `;
+}
+
+function renderCatalogMatcher(draft) {
+  const matched = Boolean(draft.metadata_id);
+  const providerOverride = draft.metadata_provider_override || "";
+  const provider = providerOverride || state.settings.default_metadata_provider || "anilist";
+  const providerName = catalogProviderName(provider);
+  const catalogUrl = draft.metadata_url || (matched ? catalogFallbackUrl(provider, draft.metadata_id) : "");
+  const providerOptions = (state.meta.metadata_providers || [])
+    .map(
+      (item) =>
+        `<option value="${escapeHtml(item.id)}" ${item.id === providerOverride ? "selected" : ""}>${escapeHtml(item.name)}</option>`,
+    )
+    .join("");
+  return `
+    <section class="catalog-match field-span">
+      <input name="metadata_provider" type="hidden" value="${escapeHtml(draft.metadata_provider || "")}" />
+      <input name="metadata_id" type="hidden" value="${escapeHtml(draft.metadata_id || "")}" />
+      <input name="metadata_title" type="hidden" value="${escapeHtml(draft.metadata_title || "")}" />
+      <input name="metadata_url" type="hidden" value="${escapeHtml(draft.metadata_url || "")}" />
+      <input name="metadata_chapter_count" type="hidden" value="${escapeHtml(draft.metadata_chapter_count || "")}" />
+      <div class="settings-section-heading">
+        <div>
+          <h3>Metadata match</h3>
+          <p>The metadata provider identifies the series; source URLs remain responsible for chapter availability.</p>
+        </div>
+        <button class="small-action compact-action" type="button" data-sidebar-action="search-catalog">
+          <span>${state.catalogSearching ? "Searching…" : matched ? "Change match" : "Find match"}</span>
+        </button>
+      </div>
+      <label>
+        Metadata provider override
+        <select name="metadata_provider_override">
+          <option value="" ${providerOverride ? "" : "selected"}>Use global default (${escapeHtml(catalogProviderName(state.settings.default_metadata_provider))})</option>
+          ${providerOptions}
+        </select>
+      </label>
+      <div class="catalog-current${matched ? " matched" : ""}">
+        ${
+          matched
+            ? `<strong>${escapeHtml(draft.metadata_title || `${providerName} #${draft.metadata_id}`)}</strong><a href="${escapeHtml(catalogUrl)}" target="_blank" rel="noreferrer">${escapeHtml(providerName)} #${escapeHtml(draft.metadata_id)}</a>`
+            : `<strong>Not matched</strong><span>Use the library title to find the canonical ${escapeHtml(providerName)} entry.</span>`
+        }
+      </div>
+      ${
+        state.catalogMessage
+          ? `<p class="field-hint">${escapeHtml(state.catalogMessage)}</p>`
+          : ""
+      }
+      ${
+        state.catalogMatches.length
+          ? `<div class="catalog-results">${state.catalogMatches
+              .map(
+                (match) => `
+                  <button
+                    class="catalog-result"
+                    type="button"
+                    data-catalog-id="${escapeHtml(match.id)}"
+                    data-catalog-title="${escapeHtml(match.title)}"
+                    data-catalog-url="${escapeHtml(match.url)}"
+                    data-catalog-provider="${escapeHtml(match.provider || "anilist")}"
+                    data-catalog-chapters="${escapeHtml(match.chapter_count || "")}"
+                  >
+                    <strong>${escapeHtml(match.title)}</strong>
+                    <span>${escapeHtml([match.format, match.status, match.country_of_origin].filter(Boolean).join(" · "))}</span>
+                  </button>
+                `,
+              )
+              .join("")}</div>`
+          : ""
+      }
+    </section>
   `;
 }
 
@@ -2746,6 +2914,13 @@ function readSeriesFormPayload(form) {
   return {
     source_url: String(formData.get("source_url") || "").trim(),
     backup_source_urls: normalizeBackupSourceUrls(formData.get("backup_source_urls")),
+    metadata_provider: String(formData.get("metadata_provider") || "").trim() || null,
+    metadata_provider_override:
+      String(formData.get("metadata_provider_override") || "").trim() || null,
+    metadata_id: String(formData.get("metadata_id") || "").trim() || null,
+    metadata_title: String(formData.get("metadata_title") || "").trim() || null,
+    metadata_url: String(formData.get("metadata_url") || "").trim() || null,
+    metadata_chapter_count: Number(formData.get("metadata_chapter_count") || 0) || null,
     title: String(formData.get("title") || "").trim(),
     folder: String(formData.get("folder") || "").trim(),
     check_interval_hours: Number(formData.get("check_interval_hours") || 0.5),
@@ -2782,6 +2957,12 @@ function syncDraftFromPayload(payload, mode) {
     title: payload.title,
     source_url: payload.source_url,
     backup_source_urls: normalizeBackupSourceUrls(payload.backup_source_urls).join("\n"),
+    metadata_provider: payload.metadata_provider || "",
+    metadata_provider_override: payload.metadata_provider_override || "",
+    metadata_id: payload.metadata_id || "",
+    metadata_title: payload.metadata_title || "",
+    metadata_url: payload.metadata_url || "",
+    metadata_chapter_count: payload.metadata_chapter_count || "",
     folder: payload.folder,
     check_interval_hours: String(payload.check_interval_hours || "0.5"),
     naming_format: payload.naming_format || "",
@@ -2896,11 +3077,12 @@ listen($("#optionsForm"), "submit", async (event) => {
     method: "POST",
     body: JSON.stringify({
       default_naming_format: String(form.get("default_naming_format") || "{ChapterFullTitle}"),
+      default_metadata_provider: String(form.get("default_metadata_provider") || "anilist"),
       kavita_url: String(form.get("kavita_url") || "").trim(),
       komga_url: String(form.get("komga_url") || "").trim(),
     }),
   });
-  setNotice("Global naming defaults saved.", "success");
+  setNotice("Global defaults saved.", "success");
   await refreshAll({ quiet: true });
 });
 
@@ -3224,6 +3406,19 @@ listen($("#sidebarPanel"), "input", async (event) => {
 listen($("#sidebarPanel"), "change", async (event) => {
   const form = event.target.closest("#seriesForm");
   if (form) {
+    if (event.target?.name === "metadata_provider_override") {
+      for (const fieldName of [
+        "metadata_provider",
+        "metadata_id",
+        "metadata_title",
+        "metadata_url",
+        "metadata_chapter_count",
+      ]) {
+        if (form.elements[fieldName]) form.elements[fieldName].value = "";
+      }
+      state.catalogMatches = [];
+      state.catalogMessage = "";
+    }
     if (event.target?.name === "title" || event.target?.name === "folder") {
       updateFolderSelectOptions(form, form.elements.title?.value || "");
     }
@@ -3279,8 +3474,60 @@ listen($("#sidebarPanel"), "click", async (event) => {
     return;
   }
 
+  const catalogResult = event.target.closest("[data-catalog-id]");
+  if (catalogResult) {
+    const form = $("#sidebarPanel #seriesForm");
+    if (!form) return;
+    const mode = form.dataset.mode || "create";
+    syncDraftFromPayload(normalizeSeriesPayload(readSeriesFormPayload(form)), mode);
+    const draft = mode === "edit" ? state.editDraft : state.discoverDraft;
+    Object.assign(draft, {
+      metadata_provider: catalogResult.dataset.catalogProvider || "anilist",
+      metadata_id: catalogResult.dataset.catalogId || "",
+      metadata_title: catalogResult.dataset.catalogTitle || "",
+      metadata_url: catalogResult.dataset.catalogUrl || "",
+      metadata_chapter_count: catalogResult.dataset.catalogChapters || "",
+    });
+    if (mode === "edit") state.editDraftDirty = true;
+    state.catalogMatches = [];
+    state.catalogMessage = `Matched to ${draft.metadata_title}. Save series settings to persist it.`;
+    renderSidebar();
+    return;
+  }
+
   const actionButton = event.target.closest("[data-sidebar-action]");
   const selected = getSelectedSeries();
+  if (actionButton?.dataset.sidebarAction === "search-catalog") {
+    const form = $("#sidebarPanel #seriesForm");
+    if (!form || state.catalogSearching) return;
+    const mode = form.dataset.mode || "create";
+    const payload = normalizeSeriesPayload(readSeriesFormPayload(form));
+    const provider =
+      payload.metadata_provider_override ||
+      state.settings.default_metadata_provider ||
+      "anilist";
+    const providerName = catalogProviderName(provider);
+    syncDraftFromPayload(payload, mode);
+    state.catalogSearching = true;
+    state.catalogMatches = [];
+    state.catalogMessage = `Searching ${providerName}…`;
+    renderSidebar();
+    try {
+      const result = await api(
+        `/api/metadata/catalog?provider=${encodeURIComponent(provider)}&query=${encodeURIComponent(payload.title)}&limit=8`,
+      );
+      state.catalogMatches = result.matches || [];
+      state.catalogMessage = state.catalogMatches.length
+        ? "Choose the canonical series entry."
+        : `No ${providerName} matches were found for this title.`;
+    } catch (error) {
+      state.catalogMessage = error.message || `${providerName} lookup failed.`;
+    } finally {
+      state.catalogSearching = false;
+      renderSidebar();
+    }
+    return;
+  }
   if (actionButton?.dataset.sidebarAction === "toggle-poster-picker") {
     if (!selected) return;
     if (state.posterPickerSeriesId === selected.id) {
@@ -3326,6 +3573,25 @@ listen($("#sidebarPanel"), "click", async (event) => {
   if (actionButton.dataset.sidebarAction === "queue-failed") {
     const result = await api(`/api/series/${selected.id}/queue-failed`, { method: "POST" });
     setNotice(`Queued ${Number(result.queued || 0)} failed chapter${Number(result.queued || 0) === 1 ? "" : "s"}.`, "success");
+    await refreshAll({ quiet: true });
+    return;
+  }
+
+  if (actionButton.dataset.sidebarAction === "reset-series") {
+    const deleteFiles = Boolean($("#resetDeleteFiles")?.checked);
+    const warning = deleteFiles
+      ? `Clear every indexed chapter for ${selected.title} and permanently delete its recorded CBZ files?`
+      : `Clear every indexed chapter and error for ${selected.title}, keep its CBZ files, and rescan now?`;
+    if (!window.confirm(warning)) return;
+    const result = await api(`/api/series/${selected.id}/reset`, {
+      method: "POST",
+      body: JSON.stringify({ delete_files: deleteFiles, rescan: true }),
+    });
+    setNotice(
+      `Cleared ${Number(result.removed_records || 0)} chapter records${deleteFiles ? ` and deleted ${Number(result.deleted_files || 0)} files` : ""}. Rescan queued.`,
+      "success",
+    );
+    state.selectedChapterIds.clear();
     await refreshAll({ quiet: true });
     return;
   }

@@ -27,6 +27,7 @@ BROWSERLIKE_HEADERS = {
 }
 
 ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
+MANGAUPDATES_API_BASE = "https://api.mangaupdates.com/v1"
 KITSU_API_BASE = "https://kitsu.io/api/edge"
 JIKAN_API_BASE = "https://api.jikan.moe/v4"
 MANGADEX_API_BASE = "https://api.mangadex.org"
@@ -347,8 +348,13 @@ def fetch_anilist_search_with_requests(query: str, limit: int) -> dict[str, obje
                   Page(perPage: $perPage) {
                     media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
                       id
+                      idMal
                       format
+                      status
                       countryOfOrigin
+                      chapters
+                      volumes
+                      siteUrl
                       title {
                         romaji
                         english
@@ -370,6 +376,27 @@ def fetch_anilist_search_with_requests(query: str, limit: int) -> dict[str, obje
                 "search": query,
                 "perPage": max(1, min(limit, 10)),
             },
+        },
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": HEADERS["User-Agent"],
+        },
+        timeout=30,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_mangaupdates_search_with_requests(query: str, limit: int) -> dict[str, object]:
+    import requests
+
+    response = requests.post(
+        f"{MANGAUPDATES_API_BASE}/series/search",
+        json={
+            "search": query,
+            "perpage": max(1, min(limit, 25)),
         },
         headers={
             "Accept": "application/json",
@@ -556,6 +583,144 @@ def anilist_cover_url(item: dict[str, object]) -> str:
         str(cover_block.get("large") or "").strip(),
         str(cover_block.get("medium") or "").strip(),
     )
+
+
+def anilist_catalog_match(item: dict[str, object]) -> dict[str, object]:
+    title_block = item.get("title") if isinstance(item.get("title"), dict) else {}
+    preferred_title = preferred_artwork_url(
+        str(title_block.get("english") or "").strip(),
+        str(title_block.get("userPreferred") or "").strip(),
+        str(title_block.get("romaji") or "").strip(),
+        str(title_block.get("native") or "").strip(),
+    )
+    item_id = str(item.get("id") or "").strip()
+    site_url = str(item.get("siteUrl") or "").strip()
+    if not site_url and item_id:
+        site_url = f"https://anilist.co/manga/{item_id}"
+    return {
+        "provider": "anilist",
+        "id": item_id,
+        "title": preferred_title,
+        "url": site_url,
+        "format": str(item.get("format") or "").strip(),
+        "status": str(item.get("status") or "").strip(),
+        "country_of_origin": str(item.get("countryOfOrigin") or "").strip(),
+        "chapter_count": item.get("chapters") if isinstance(item.get("chapters"), int) else None,
+        "volume_count": item.get("volumes") if isinstance(item.get("volumes"), int) else None,
+        "cover_image_url": anilist_cover_url(item),
+        "titles": anilist_title_variants(item),
+    }
+
+
+async def search_anilist_catalog(query: str, limit: int = 8) -> list[dict[str, object]]:
+    cleaned = " ".join(str(query or "").strip().split())
+    if len(cleaned) < 2:
+        return []
+    payload = await asyncio.to_thread(
+        fetch_anilist_search_with_requests,
+        cleaned,
+        max(1, min(limit, 12)),
+    )
+    media = payload.get("data", {}).get("Page", {}).get("media", [])
+    if not isinstance(media, list):
+        return []
+
+    query_variants = {normalize_artwork_key(cleaned)}
+    ranked: list[tuple[int, int, str, dict[str, object]]] = []
+    for item in media:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        match_rank = artwork_match_rank(query_variants, anilist_title_variants(item))
+        catalog_item = anilist_catalog_match(item)
+        catalog_item["match_score"] = match_rank
+        ranked.append(
+            (
+                -match_rank,
+                anilist_format_rank(item.get("format")),
+                str(catalog_item.get("title") or "").lower(),
+                catalog_item,
+            )
+        )
+    ranked.sort(key=lambda item: item[:3])
+    return [item[3] for item in ranked[: max(1, min(limit, 12))]]
+
+
+def mangaupdates_type_rank(value: object) -> int:
+    normalized = str(value or "").strip().lower()
+    return {
+        "manhwa": 0,
+        "manga": 1,
+        "manhua": 2,
+        "webtoon": 3,
+        "novel": 9,
+    }.get(normalized, 5)
+
+
+def mangaupdates_catalog_match(record: dict[str, object]) -> dict[str, object]:
+    image = record.get("image") if isinstance(record.get("image"), dict) else {}
+    image_urls = image.get("url") if isinstance(image.get("url"), dict) else {}
+    item_id = str(record.get("series_id") or "").strip()
+    title = str(record.get("title") or "").strip()
+    return {
+        "provider": "mangaupdates",
+        "id": item_id,
+        "title": title,
+        "url": str(record.get("url") or "").strip(),
+        "format": str(record.get("type") or "").strip(),
+        "status": "",
+        "country_of_origin": "",
+        # MangaUpdates does not expose a reliable current chapter total here.
+        "chapter_count": None,
+        "volume_count": None,
+        "cover_image_url": preferred_artwork_url(
+            str(image_urls.get("original") or "").strip(),
+            str(image_urls.get("thumb") or "").strip(),
+        ),
+        "titles": [title] if title else [],
+    }
+
+
+async def search_mangaupdates_catalog(query: str, limit: int = 8) -> list[dict[str, object]]:
+    cleaned = " ".join(str(query or "").strip().split())
+    if len(cleaned) < 2:
+        return []
+    payload = await asyncio.to_thread(
+        fetch_mangaupdates_search_with_requests,
+        cleaned,
+        max(1, min(limit, 12)),
+    )
+    results = payload.get("results", [])
+    if not isinstance(results, list):
+        return []
+
+    query_variants = {normalize_artwork_key(cleaned)}
+    ranked: list[tuple[int, int, str, dict[str, object]]] = []
+    for result in results:
+        record = result.get("record") if isinstance(result, dict) else None
+        if not isinstance(record, dict) or not record.get("series_id"):
+            continue
+        catalog_item = mangaupdates_catalog_match(record)
+        match_rank = artwork_match_rank(query_variants, catalog_item["titles"])
+        catalog_item["match_score"] = match_rank
+        ranked.append(
+            (
+                -match_rank,
+                mangaupdates_type_rank(record.get("type")),
+                str(catalog_item.get("title") or "").lower(),
+                catalog_item,
+            )
+        )
+    ranked.sort(key=lambda item: item[:3])
+    return [item[3] for item in ranked[: max(1, min(limit, 12))]]
+
+
+async def search_catalog(provider: str, query: str, limit: int = 8) -> list[dict[str, object]]:
+    normalized_provider = str(provider or "anilist").strip().lower()
+    if normalized_provider == "anilist":
+        return await search_anilist_catalog(query, limit=limit)
+    if normalized_provider == "mangaupdates":
+        return await search_mangaupdates_catalog(query, limit=limit)
+    raise ValueError(f"Unsupported catalog provider: {provider}")
 
 
 def kitsu_title_variants(attributes: dict[str, object]) -> list[str]:

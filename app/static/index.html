@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/png" href="/static/branding/tcb-scanner-favicon.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260924b" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260924c" />
   </head>
   <body>
     <main class="app-shell">
@@ -220,7 +220,7 @@
             <div class="settings-drawer-heading">
               <div>
                 <h2>Settings</h2>
-                <p>Adjust naming defaults, back up your library, and review every supported source.</p>
+                <p>Adjust metadata and naming defaults, back up your library, and review every supported source.</p>
               </div>
               <button class="settings-drawer-close" id="settingsDrawerClose" type="button" aria-label="Close settings">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
@@ -231,8 +231,8 @@
               <section class="settings-section">
                 <div class="settings-section-heading">
                   <div>
-                    <h3>Default naming</h3>
-                    <p>Set the template new series inherit before any per-series override is applied.</p>
+                    <h3>Global defaults</h3>
+                    <p>Choose the default metadata service and naming template before per-series overrides are applied.</p>
                   </div>
                 </div>
 
@@ -240,6 +240,14 @@
                   <label class="field-span">
                     <span>Default naming format</span>
                     <input name="default_naming_format" type="text" placeholder="{ChapterFullTitle}" />
+                  </label>
+                  <label class="field-span">
+                    <span>Default metadata provider</span>
+                    <select name="default_metadata_provider">
+                      <option value="anilist">AniList</option>
+                      <option value="mangaupdates">MangaUpdates</option>
+                    </select>
+                    <small class="field-hint">Used when a series does not have its own metadata-provider override.</small>
                   </label>
                   <label class="field-span">
                     <span>Kavita URL</span>
@@ -308,6 +316,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260924b"></script>
+    <script src="/static/app.js?v=20260924c"></script>
   </body>
 </html>

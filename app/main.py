@@ -24,6 +24,11 @@ LIBRARY_DIR = Path(os.getenv("LIBRARY_DIR", str(DATA_DIR / "library")))
 WORK_DIR = Path(os.getenv("WORK_DIR", str(DATA_DIR / "work")))
 REQUEST_DELAY = max(0.2, float(os.getenv("TCB_REQUEST_DELAY", "0.8")))
 APP_VERSION = (os.getenv("APP_VERSION", "0.2.0").strip() or "0.2.0")
+DEFAULT_METADATA_PROVIDER = "anilist"
+METADATA_PROVIDERS = [
+    {"id": "anilist", "name": "AniList"},
+    {"id": "mangaupdates", "name": "MangaUpdates"},
+]
 NAMING_VARIABLES = [
     {
         "name": "SeriesName",
@@ -139,6 +144,12 @@ class SeriesCreate(BaseModel):
     check_interval_hours: float = Field(default=0.5, ge=0.5, le=168)
     naming_format: str | None = Field(default=None, max_length=180)
     poster_image_url: str | None = Field(default=None, max_length=1200)
+    metadata_provider: str | None = Field(default=None, max_length=40)
+    metadata_provider_override: str | None = Field(default=None, max_length=40)
+    metadata_id: str | None = Field(default=None, max_length=80)
+    metadata_title: str | None = Field(default=None, max_length=240)
+    metadata_url: str | None = Field(default=None, max_length=1200)
+    metadata_chapter_count: int | None = Field(default=None, ge=1)
     enabled: bool = True
     backfill_existing: bool = False
 
@@ -171,6 +182,26 @@ class SeriesCreate(BaseModel):
     def trim_text(cls, value: str) -> str:
         return " ".join(value.strip().split())
 
+    @field_validator("metadata_provider", "metadata_provider_override")
+    @classmethod
+    def validate_metadata_provider(cls, value: str | None) -> str | None:
+        cleaned = str(value or "").strip().lower()
+        if not cleaned:
+            return None
+        if cleaned not in {"anilist", "mangaupdates"}:
+            raise ValueError("Choose AniList or MangaUpdates as the metadata provider.")
+        return cleaned
+
+    @field_validator("metadata_url")
+    @classmethod
+    def validate_metadata_url(cls, value: str | None) -> str | None:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            return None
+        if not cleaned.startswith(("http://", "https://")):
+            raise ValueError("Metadata links must use http or https.")
+        return cleaned
+
 
 class EnabledUpdate(BaseModel):
     enabled: bool
@@ -188,6 +219,15 @@ class SettingsUpdate(BaseModel):
     )
     kavita_url: str | None = Field(default=None, max_length=600)
     komga_url: str | None = Field(default=None, max_length=600)
+    default_metadata_provider: str = DEFAULT_METADATA_PROVIDER
+
+    @field_validator("default_metadata_provider")
+    @classmethod
+    def validate_default_metadata_provider(cls, value: str) -> str:
+        cleaned = str(value or "").strip().lower()
+        if cleaned not in {"anilist", "mangaupdates"}:
+            raise ValueError("Choose AniList or MangaUpdates as the metadata provider.")
+        return cleaned
 
 
 class QueueChapters(BaseModel):
@@ -200,6 +240,11 @@ class SeriesUpdate(SeriesCreate):
 
 class PosterUpdate(BaseModel):
     poster_image_url: str | None = Field(default=None, max_length=1200)
+
+
+class SeriesReset(BaseModel):
+    delete_files: bool = False
+    rescan: bool = True
 
 
 @app.on_event("startup")
@@ -239,6 +284,8 @@ async def get_settings() -> dict[str, Any]:
         "variables": NAMING_VARIABLES,
         "kavita_url": store.get_setting("kavita_url") or "",
         "komga_url": store.get_setting("komga_url") or "",
+        "default_metadata_provider": store.get_setting("default_metadata_provider")
+        or DEFAULT_METADATA_PROVIDER,
         "library_roots": [str(path) for path in LIBRARY_ROOTS],
     }
 
@@ -251,6 +298,7 @@ async def get_meta() -> dict[str, Any]:
         "version_label": display_version(APP_VERSION),
         "supported_source_count": scraper.supported_source_count(),
         "supported_sources": scraper.list_supported_sources(),
+        "metadata_providers": METADATA_PROVIDERS,
     }
 
 
@@ -265,6 +313,42 @@ async def get_artwork(title: str, source_url: str) -> dict[str, Any]:
             "poster_choices": [],
         }
     return await scraper.resolve_series_artwork(cleaned_title, cleaned_url)
+
+
+@app.get("/api/metadata/anilist")
+async def search_anilist_metadata(query: str, limit: int = 8) -> dict[str, Any]:
+    cleaned = " ".join(str(query or "").strip().split())
+    if len(cleaned) < 2:
+        return {"query": cleaned, "matches": []}
+    try:
+        matches = await scraper.search_anilist_catalog(cleaned, limit=max(1, min(limit, 12)))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="AniList metadata lookup failed.") from exc
+    return {"query": cleaned, "matches": matches}
+
+
+@app.get("/api/metadata/catalog")
+async def search_catalog_metadata(
+    query: str,
+    provider: str = "anilist",
+    limit: int = 8,
+) -> dict[str, Any]:
+    cleaned = " ".join(str(query or "").strip().split())
+    normalized_provider = str(provider or "anilist").strip().lower()
+    if normalized_provider not in {"anilist", "mangaupdates"}:
+        raise HTTPException(status_code=400, detail="Unsupported metadata provider.")
+    if len(cleaned) < 2:
+        return {"query": cleaned, "provider": normalized_provider, "matches": []}
+    try:
+        matches = await scraper.search_catalog(
+            normalized_provider,
+            cleaned,
+            limit=max(1, min(limit, 12)),
+        )
+    except Exception as exc:
+        provider_name = "AniList" if normalized_provider == "anilist" else "MangaUpdates"
+        raise HTTPException(status_code=502, detail=f"{provider_name} metadata lookup failed.") from exc
+    return {"query": cleaned, "provider": normalized_provider, "matches": matches}
 
 
 @app.get("/api/artwork/image")
@@ -294,6 +378,7 @@ async def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
     )
     store.set_setting("kavita_url", str(payload.kavita_url or "").strip())
     store.set_setting("komga_url", str(payload.komga_url or "").strip())
+    store.set_setting("default_metadata_provider", payload.default_metadata_provider)
     return await get_settings()
 
 
@@ -329,6 +414,18 @@ async def create_series(payload: SeriesCreate) -> dict[str, Any]:
         data.get("backup_source_urls", []),
     )
     data["check_interval_minutes"] = int(round(float(data.pop("check_interval_hours")) * 60))
+    if not data.get("metadata_id"):
+        provider = str(
+            data.get("metadata_provider_override")
+            or store.get_setting("default_metadata_provider")
+            or DEFAULT_METADATA_PROVIDER
+        ).strip().lower()
+        try:
+            matches = await scraper.search_catalog(provider, data["title"], limit=1)
+        except Exception:
+            matches = []
+        if matches and int(matches[0].get("match_score") or 0) >= 2:
+            apply_catalog_match(data, matches[0])
     if not data["folder"]:
         data["folder"] = data["title"]
     series = store.create_series(data)
@@ -382,6 +479,59 @@ async def set_series_poster(series_id: int, payload: PosterUpdate) -> dict[str, 
         raise HTTPException(status_code=404, detail="Series not found.")
     series = store.set_series_poster(series_id, payload.poster_image_url)
     return {"series": series}
+
+
+@app.post("/api/series/{series_id}/reset")
+async def reset_series(series_id: int, payload: SeriesReset) -> dict[str, Any]:
+    series = store.get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found.")
+    chapters = store.list_chapters(series_id)
+    if any(chapter.get("status") == "downloading" for chapter in chapters):
+        raise HTTPException(
+            status_code=409,
+            detail="Wait for active chapter downloads to finish before resetting this series.",
+        )
+
+    deleted_files = 0
+    missing_files = 0
+    if payload.delete_files:
+        file_paths = {
+            Path(str(chapter.get("cbz_path") or "").strip())
+            for chapter in chapters
+            if str(chapter.get("cbz_path") or "").strip()
+        }
+        for file_path in file_paths:
+            if file_path.suffix.lower() != ".cbz" or not path_within_library_roots(file_path):
+                raise HTTPException(
+                    status_code=400,
+                    detail="A recorded chapter file is outside the configured library roots.",
+                )
+        for file_path in file_paths:
+            try:
+                file_path.unlink()
+                deleted_files += 1
+            except FileNotFoundError:
+                missing_files += 1
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Unable to delete {file_path.name}.",
+                ) from exc
+
+    try:
+        removed_records = store.reset_series(series_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if payload.rescan:
+        schedule_check(series_id)
+    return {
+        "ok": True,
+        "removed_records": removed_records,
+        "deleted_files": deleted_files,
+        "missing_files": missing_files,
+        "rescan_queued": payload.rescan,
+    }
 
 
 @app.get("/api/series/{series_id}/chapters")
@@ -595,3 +745,26 @@ def without_primary_source(primary_url: str, backup_urls: list[str]) -> list[str
         for url in backup_urls
         if str(url or "").strip().rstrip("/").lower() != primary_key
     ]
+
+
+def apply_catalog_match(data: dict[str, Any], match: dict[str, object]) -> None:
+    data["metadata_provider"] = str(match.get("provider") or "anilist").strip() or "anilist"
+    data["metadata_id"] = str(match.get("id") or "").strip() or None
+    data["metadata_title"] = str(match.get("title") or "").strip() or None
+    data["metadata_url"] = str(match.get("url") or "").strip() or None
+    chapter_count = match.get("chapter_count")
+    data["metadata_chapter_count"] = chapter_count if isinstance(chapter_count, int) else None
+
+
+def path_within_library_roots(file_path: Path) -> bool:
+    try:
+        resolved = file_path.resolve()
+    except OSError:
+        resolved = file_path.absolute()
+    for library_root in LIBRARY_ROOTS:
+        try:
+            resolved.relative_to(library_root.resolve())
+        except (OSError, ValueError):
+            continue
+        return True
+    return False

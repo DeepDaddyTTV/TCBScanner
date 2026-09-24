@@ -78,6 +78,51 @@ class WeebCentralProviderTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].title, "Blue Exorcist")
 
+    def test_anilist_catalog_match_preserves_identity_metadata(self) -> None:
+        match = scraper.anilist_catalog_match(
+            {
+                "id": 179445,
+                "format": "MANGA",
+                "status": "RELEASING",
+                "countryOfOrigin": "KR",
+                "chapters": None,
+                "siteUrl": "https://anilist.co/manga/179445",
+                "title": {
+                    "english": "Solo Leveling: Ragnarok",
+                    "userPreferred": "Na Honjaman Level Up: Ragnarok",
+                },
+                "synonyms": [],
+                "coverImage": {"large": "https://images.example/cover.jpg"},
+            }
+        )
+        self.assertEqual(match["id"], "179445")
+        self.assertEqual(match["title"], "Solo Leveling: Ragnarok")
+        self.assertIsNone(match["chapter_count"])
+
+    def test_mangaupdates_catalog_match_preserves_manhwa_identity(self) -> None:
+        match = scraper.mangaupdates_catalog_match(
+            {
+                "series_id": 47955563021,
+                "title": "Solo Leveling: Ragnarok",
+                "url": "https://www.mangaupdates.com/series/m13i58t/solo-leveling-ragnarok",
+                "type": "Manhwa",
+                "image": {
+                    "url": {
+                        "original": "https://cdn.mangaupdates.com/image/i505562.jpg",
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(match["provider"], "mangaupdates")
+        self.assertEqual(match["id"], "47955563021")
+        self.assertEqual(match["format"], "Manhwa")
+        self.assertIsNone(match["chapter_count"])
+        self.assertEqual(
+            match["cover_image_url"],
+            "https://cdn.mangaupdates.com/image/i505562.jpg",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

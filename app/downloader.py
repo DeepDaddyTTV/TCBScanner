@@ -103,6 +103,10 @@ class MangaDownloader:
         ]
         candidates = [primary_url, *backup_urls]
         failures: list[str] = []
+        merged: dict[str, dict[str, object]] = {}
+        selected_url = ""
+        selected_index = -1
+        expected_count = int(series.get("metadata_chapter_count") or 0)
 
         for index, source_url in enumerate(candidates):
             try:
@@ -110,7 +114,7 @@ class MangaDownloader:
             except Exception as exc:  # noqa: BLE001 - try the next configured source
                 host = urlparse(source_url).netloc or source_url
                 failures.append(f"{host}: {exc}")
-                if index < len(candidates) - 1:
+                if index < len(candidates) - 1 and not merged:
                     next_host = urlparse(candidates[index + 1]).netloc or candidates[index + 1]
                     self.store.add_event(
                         int(series["id"]),
@@ -118,20 +122,60 @@ class MangaDownloader:
                         "warning",
                         f"Source {host} failed; checking backup {next_host}.",
                     )
+                if merged:
+                    self.store.add_event(
+                        int(series["id"]),
+                        None,
+                        "warning",
+                        f"Backup source {host} failed; retaining chapters from an earlier source.",
+                    )
                 continue
 
-            if index > 0:
-                used_host = urlparse(source_url).netloc or source_url
+            if expected_count and source_chapter_set_conflicts(chapters, expected_count):
+                host = urlparse(source_url).netloc or source_url
+                failures.append(
+                    f"{host}: chapter set conflicts with catalog count {expected_count}"
+                )
                 self.store.add_event(
                     int(series["id"]),
                     None,
-                    "info",
-                    f"Using backup source {used_host} for this check.",
+                    "warning",
+                    f"Ignored {host}: its chapter set conflicts with the catalog count of {expected_count}.",
                 )
-            return resolved_url, chapters, index
+                continue
 
-        detail = "; ".join(failures) or "No source URLs are configured."
-        raise RuntimeError(f"All configured sources failed. {detail}")
+            if selected_index < 0:
+                selected_url = resolved_url
+                selected_index = index
+
+            added = 0
+            for chapter in chapters:
+                key = str(chapter.get("chapter_key") or chapter.get("url") or "").strip()
+                if not key or key in merged:
+                    continue
+                merged[key] = chapter
+                added += 1
+
+            if index > 0:
+                used_host = urlparse(source_url).netloc or source_url
+                if selected_index == index:
+                    message = f"Using backup source {used_host} for this check."
+                else:
+                    message = f"Added {added} chapter(s) available only from backup source {used_host}."
+                self.store.add_event(int(series["id"]), None, "info", message)
+
+        if selected_index < 0:
+            detail = "; ".join(failures) or "No source URLs are configured."
+            raise RuntimeError(f"All configured sources failed. {detail}")
+
+        chapters = sorted(
+            merged.values(),
+            key=lambda chapter: (
+                float(chapter.get("sort_key") or 0),
+                str(chapter.get("url") or ""),
+            ),
+        )
+        return selected_url, chapters, selected_index
 
     async def _download_chapter(self, series: dict[str, Any], chapter: dict[str, Any]) -> None:
         chapter_id = int(chapter["id"])
@@ -220,6 +264,23 @@ class MangaDownloader:
         template = str(series.get("naming_format") or self.store.get_default_naming_format())
         file_name = render_naming_template(series, chapter, template, page_count)
         return folder / file_name
+
+
+def source_chapter_set_conflicts(
+    chapters: list[dict[str, object]],
+    expected_count: int,
+) -> bool:
+    if expected_count <= 0 or not chapters:
+        return False
+    tolerance = max(2, int(expected_count * 0.05))
+    numeric_keys: list[float] = []
+    for chapter in chapters:
+        try:
+            numeric_keys.append(float(chapter.get("sort_key") or 0))
+        except (TypeError, ValueError):
+            continue
+    highest = max(numeric_keys, default=0)
+    return len(chapters) > expected_count + tolerance or highest > expected_count + tolerance
 
 
 def render_naming_template(

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from app.downloader import MangaDownloader
+from app.downloader import MangaDownloader, source_chapter_set_conflicts
 from app.store import Store
 
 
@@ -14,6 +14,12 @@ def series_payload(**overrides: object) -> dict[str, object]:
         "title": "Backup Test",
         "source_url": "https://mangack.com/manga/backup-test",
         "backup_source_urls": ["https://opchapters.com/manga/backup-test/"],
+        "metadata_provider": "anilist",
+        "metadata_provider_override": "anilist",
+        "metadata_id": "179445",
+        "metadata_title": "Solo Leveling: Ragnarok",
+        "metadata_url": "https://anilist.co/manga/179445",
+        "metadata_chapter_count": 69,
         "folder": "Backup Test",
         "check_interval_minutes": 60,
         "enabled": True,
@@ -32,6 +38,9 @@ class BackupSourceStoreTests(unittest.TestCase):
                 series["backup_source_urls"],
                 ["https://opchapters.com/manga/backup-test/"],
             )
+            self.assertEqual(series["metadata_id"], "179445")
+            self.assertEqual(series["metadata_provider_override"], "anilist")
+            self.assertEqual(series["metadata_chapter_count"], 69)
 
             updated_payload = series_payload(
                 backup_source_urls=[
@@ -44,6 +53,23 @@ class BackupSourceStoreTests(unittest.TestCase):
                 updated["backup_source_urls"],
                 ["https://opchapters.com/manga/backup-test/"],
             )
+
+    def test_reset_series_clears_index_but_preserves_catalog_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = Store(Path(temp_dir) / "app.db")
+            series = store.create_series(series_payload())
+            series_id = int(series["id"])
+            store.upsert_chapters(
+                series_id,
+                [{"url": "https://example.com/1", "title": "Chapter 1", "chapter_key": "1", "sort_key": 1}],
+                "pending",
+            )
+            self.assertEqual(store.reset_series(series_id), 1)
+            reset = store.get_series(series_id)
+            self.assertEqual(reset["chapter_count"], 0)
+            self.assertFalse(reset["initialized"])
+            self.assertEqual(reset["metadata_id"], "179445")
+            self.assertIn("Reset chapter index", store.list_events(series_id=series_id)[0]["message"])
 
     def test_backup_chapter_replaces_failed_primary_without_duplicate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -127,6 +153,51 @@ class BackupSourceDownloaderTests(unittest.IsolatedAsyncioTestCase):
             )
             messages = [event["message"] for event in store.list_events(series_id=int(series["id"]))]
             self.assertTrue(any("Using backup source opchapters.com" in message for message in messages))
+
+    async def test_primary_and_backup_chapters_are_merged_by_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = Store(root / "app.db")
+            series = store.create_series(series_payload(metadata_chapter_count=None))
+            downloader = MangaDownloader(
+                store,
+                library_roots=[root / "manga"],
+                work_dir=root / "work",
+                request_delay=0.2,
+            )
+            downloader._discover_chapters = AsyncMock(
+                side_effect=[
+                    (
+                        series["source_url"],
+                        [
+                            {"url": "https://primary/1", "title": "Chapter 1", "chapter_key": "1", "sort_key": 1},
+                            {"url": "https://primary/2", "title": "Chapter 2", "chapter_key": "2", "sort_key": 2},
+                        ],
+                    ),
+                    (
+                        series["backup_source_urls"][0],
+                        [
+                            {"url": "https://backup/2", "title": "Chapter 2", "chapter_key": "2", "sort_key": 2},
+                            {"url": "https://backup/3", "title": "Chapter 3", "chapter_key": "3", "sort_key": 3},
+                        ],
+                    ),
+                ]
+            )
+
+            await downloader.check_series(int(series["id"]), force_download=False)
+
+            chapters = sorted(store.list_chapters(int(series["id"])), key=lambda item: item["sort_key"])
+            self.assertEqual([item["chapter_key"] for item in chapters], ["1", "2", "3"])
+            self.assertEqual(chapters[1]["source_url"], "https://primary/2")
+            self.assertEqual(chapters[2]["source_url"], "https://backup/3")
+
+    def test_catalog_count_rejects_implausible_source_set(self) -> None:
+        chapters = [
+            {"chapter_key": str(number), "sort_key": float(number), "url": f"https://wrong/{number}"}
+            for number in range(1, 202)
+        ]
+        self.assertTrue(source_chapter_set_conflicts(chapters, 69))
+        self.assertFalse(source_chapter_set_conflicts(chapters[:68], 69))
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ def utc_now() -> str:
 
 DEFAULT_NAMING_FORMAT = "{ChapterFullTitle}"
 LEGACY_DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
-SNAPSHOT_SCHEMA_VERSION = 2
+SNAPSHOT_SCHEMA_VERSION = 4
 
 
 def normalize_backup_source_urls(value: Any) -> list[str]:
@@ -121,12 +121,24 @@ class Store:
                 "backup_source_urls",
                 "TEXT NOT NULL DEFAULT '[]'",
             )
+            self._ensure_column("series", "metadata_provider", "TEXT")
+            self._ensure_column("series", "metadata_provider_override", "TEXT")
+            self._ensure_column("series", "metadata_id", "TEXT")
+            self._ensure_column("series", "metadata_title", "TEXT")
+            self._ensure_column("series", "metadata_url", "TEXT")
+            self._ensure_column("series", "metadata_chapter_count", "INTEGER")
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO settings (key, value)
                 VALUES ('default_naming_format', ?)
                 """,
                 (DEFAULT_NAMING_FORMAT,),
+            )
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO settings (key, value)
+                VALUES ('default_metadata_provider', 'anilist')
+                """
             )
             self._conn.execute(
                 """
@@ -150,9 +162,11 @@ class Store:
                 INSERT INTO series (
                     title, source_url, folder, check_interval_minutes,
                     enabled, backfill_existing, initialized, created_at, naming_format,
-                    poster_image_url, backup_source_urls
+                    poster_image_url, backup_source_urls, metadata_provider,
+                    metadata_provider_override, metadata_id, metadata_title,
+                    metadata_url, metadata_chapter_count
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["title"],
@@ -165,6 +179,12 @@ class Store:
                     payload.get("naming_format") or None,
                     payload.get("poster_image_url") or None,
                     serialize_backup_source_urls(payload.get("backup_source_urls")),
+                    payload.get("metadata_provider") or None,
+                    payload.get("metadata_provider_override") or None,
+                    payload.get("metadata_id") or None,
+                    payload.get("metadata_title") or None,
+                    payload.get("metadata_url") or None,
+                    payload.get("metadata_chapter_count"),
                 ),
             )
             series_id = int(cur.lastrowid)
@@ -184,7 +204,13 @@ class Store:
                     backfill_existing = ?,
                     naming_format = ?,
                     poster_image_url = ?,
-                    backup_source_urls = ?
+                    backup_source_urls = ?,
+                    metadata_provider = ?,
+                    metadata_provider_override = ?,
+                    metadata_id = ?,
+                    metadata_title = ?,
+                    metadata_url = ?,
+                    metadata_chapter_count = ?
                 WHERE id = ?
                 """,
                 (
@@ -197,6 +223,12 @@ class Store:
                     payload.get("naming_format") or None,
                     payload.get("poster_image_url") or None,
                     serialize_backup_source_urls(payload.get("backup_source_urls")),
+                    payload.get("metadata_provider") or None,
+                    payload.get("metadata_provider_override") or None,
+                    payload.get("metadata_id") or None,
+                    payload.get("metadata_title") or None,
+                    payload.get("metadata_url") or None,
+                    payload.get("metadata_chapter_count"),
                     series_id,
                 ),
             )
@@ -331,6 +363,34 @@ class Store:
     def delete_series(self, series_id: int) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM series WHERE id = ?", (series_id,))
+
+    def reset_series(self, series_id: int) -> int:
+        with self._lock, self._conn:
+            downloading = self._conn.execute(
+                "SELECT COUNT(*) FROM chapters WHERE series_id = ? AND status = 'downloading'",
+                (series_id,),
+            ).fetchone()[0]
+            if int(downloading or 0):
+                raise RuntimeError("Wait for active chapter downloads to finish before resetting this series.")
+            removed = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM chapters WHERE series_id = ?",
+                    (series_id,),
+                ).fetchone()[0]
+                or 0
+            )
+            self._conn.execute("DELETE FROM events WHERE series_id = ?", (series_id,))
+            self._conn.execute("DELETE FROM chapters WHERE series_id = ?", (series_id,))
+            self._conn.execute(
+                """
+                UPDATE series
+                SET initialized = 0, last_checked_at = NULL, last_error = NULL
+                WHERE id = ?
+                """,
+                (series_id,),
+            )
+        self.add_event(series_id, None, "info", f"Reset chapter index; cleared {removed} record(s).")
+        return removed
 
     def record_check_start(self, series_id: int) -> None:
         with self._lock, self._conn:
@@ -700,9 +760,10 @@ class Store:
                         id, title, source_url, folder, check_interval_minutes,
                         enabled, backfill_existing, initialized, created_at,
                         last_checked_at, last_error, naming_format, poster_image_url,
-                        backup_source_urls
+                        backup_source_urls, metadata_provider, metadata_provider_override,
+                        metadata_id, metadata_title, metadata_url, metadata_chapter_count
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -720,6 +781,12 @@ class Store:
                             row["naming_format"],
                             row.get("poster_image_url"),
                             serialize_backup_source_urls(row.get("backup_source_urls")),
+                            row.get("metadata_provider"),
+                            row.get("metadata_provider_override"),
+                            row.get("metadata_id"),
+                            row.get("metadata_title"),
+                            row.get("metadata_url"),
+                            row.get("metadata_chapter_count"),
                         )
                         for row in snapshot["series"]
                     ],
@@ -910,6 +977,17 @@ class Store:
                     "backup_source_urls": normalize_backup_source_urls(
                         row.get("backup_source_urls", [])
                     ),
+                    "metadata_provider": self._optional_compact_text(row.get("metadata_provider")),
+                    "metadata_provider_override": self._optional_compact_text(
+                        row.get("metadata_provider_override")
+                    ),
+                    "metadata_id": self._optional_compact_text(row.get("metadata_id")),
+                    "metadata_title": self._optional_text(row.get("metadata_title")),
+                    "metadata_url": self._optional_text(row.get("metadata_url")),
+                    "metadata_chapter_count": self._optional_positive_int(
+                        row.get("metadata_chapter_count"),
+                        "Series metadata chapter count",
+                    ),
                 }
             )
         return normalized
@@ -1026,6 +1104,11 @@ class Store:
         if parsed <= 0:
             raise ValueError(f"{label} must be greater than zero.")
         return parsed
+
+    def _optional_positive_int(self, value: Any, label: str) -> int | None:
+        if value is None or value == "":
+            return None
+        return self._positive_int(value, label)
 
     def _non_negative_int(self, value: Any, label: str) -> int:
         try:

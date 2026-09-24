@@ -140,7 +140,8 @@ You can also paste a chapter URL; the app will try to resolve it back to the par
 Fields:
 
 - `Source URL`: Primary series page checked first.
-- `Backup source URLs`: Optional alternate supported series pages, one per line, checked in order when the primary source cannot be reached or parsed.
+- `Backup source URLs`: Optional alternate supported series pages, one per line. The primary source wins when both sites list the same chapter; backups fill missing chapters and take over when the primary cannot be reached or parsed.
+- `Metadata provider override`: Use the global AniList or MangaUpdates default, or choose a different provider for this series. Metadata matching does not replace or change the configured source pages.
 - `Library title`: Used for chapter file names when the source title is missing.
 - `Folder`: Select a destination under a configured root such as `/manga` or `/manhwa`. Leave the title portion unchanged to use the library title.
 - `Check interval (hours)`: Hours between automatic checks for new chapters.
@@ -153,9 +154,13 @@ Leave `Download all found chapters` off when you want to pick specific chapters.
 
 Each series card also has a `Monitor` checkbox. Turn it on to keep checking for new chapters; turn it off when you only want manual scans.
 
+Series settings include a `Clear index and rescan` control for repairing a bad match or source. By default it removes the stored chapter index and immediately rescans while preserving existing CBZ files. An explicit checkbox is required to permanently delete the CBZ files recorded for that series.
+
 ## Naming Formats
 
 Open the options menu in the web app to set the default CBZ naming format for every series. Each series card also has a `Naming format` field; leave it blank to use the default, or set a series-specific override.
+
+The same global settings panel selects the default metadata provider. Individual series may inherit that default or override it without changing their primary or backup source URLs.
 
 The settings drawer also includes full-library JSON export/import controls. Import replaces the existing library, chapter index, activity history, and saved settings, so it works best for backups or sharing a full curated library state.
 
@@ -190,11 +195,13 @@ Unknown variables are ignored. File names are sanitized before writing to the ma
 - `GET /api/meta`
 - `GET /api/settings`
 - `POST /api/settings`
+- `GET /api/metadata/catalog?provider=anilist|mangaupdates&query=...`
 - `GET /api/library/export`
 - `POST /api/library/import`
 - `DELETE /api/series/{series_id}`
 - `GET /api/series/{series_id}/chapters`
 - `POST /api/series/{series_id}/check`
+- `POST /api/series/{series_id}/reset`
 - `POST /api/series/{series_id}/download-missing`
 - `POST /api/series/{series_id}/naming-format`
 - `POST /api/series/{series_id}/queue-chapters`
