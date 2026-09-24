@@ -548,8 +548,10 @@ textarea:focus,
 }
 
 .series-cover img {
+  display: block;
   width: 100%;
   height: 100%;
+  max-width: 100%;
   object-fit: cover;
 }
 
@@ -1006,14 +1008,7 @@ textarea:focus,
 }
 
 .focus-watermark {
-  position: absolute;
-  top: 24px;
-  right: 7%;
-  width: 180px;
-  height: 180px;
-  border: 1px solid color-mix(in srgb, var(--sakura) 16%, transparent);
-  opacity: 0.5;
-  background: radial-gradient(circle, color-mix(in srgb, var(--sakura) 25%, transparent) 0 2px, transparent 3px);
+  display: none;
 }
 
 .focus-banner {
@@ -1043,8 +1038,10 @@ textarea:focus,
 }
 
 .focus-emblem img {
+  display: block;
   width: 100%;
   height: 100%;
+  max-width: 100%;
   object-fit: cover;
 }
 
@@ -1120,9 +1117,12 @@ textarea:focus,
   min-width: 0;
   height: 100%;
   min-height: 200px;
+  overflow: hidden;
+  border: 1px solid var(--line);
   background-image:
     linear-gradient(90deg, var(--surface), transparent 36%),
     var(--focus-art);
+  background-clip: padding-box;
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
@@ -1659,9 +1659,11 @@ input[type="checkbox"] {
 }
 
 .poster-picker-current img {
+  display: block;
   width: 100%;
   height: 100%;
   max-height: 310px;
+  max-width: 100%;
   object-fit: contain;
 }
 
@@ -1682,8 +1684,10 @@ input[type="checkbox"] {
 }
 
 .poster-choice img {
+  display: block;
   width: 100%;
   height: 120px;
+  max-width: 100%;
   object-fit: cover;
 }
 
