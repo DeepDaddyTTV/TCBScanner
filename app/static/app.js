@@ -107,6 +107,7 @@ const state = {
   editDraftSeriesId: null,
   editDraftDirty: false,
   activityDrawerOpen: false,
+  openErrorSeriesIds: new Set(),
   posterPickerSeriesId: null,
   posterChoices: [],
   posterChoicesLoading: false,
@@ -854,6 +855,43 @@ function renderSeriesListSection(title, content) {
   `;
 }
 
+function renderSeriesErrorDisclosure(series) {
+  const failedCount = Number(series.failed_count || 0);
+  const lastError = String(series.last_error || "").trim();
+  if (!lastError && !failedCount) return "";
+
+  const isOpen = state.openErrorSeriesIds.has(Number(series.id));
+  const issueCount = failedCount + (lastError ? 1 : 0);
+  const panelId = `series-errors-${Number(series.id)}`;
+  return `
+    <div class="series-error-disclosure">
+      <button
+        class="series-error-toggle"
+        type="button"
+        data-series-error-toggle="${Number(series.id)}"
+        aria-expanded="${isOpen ? "true" : "false"}"
+        aria-controls="${panelId}"
+      >
+        <span>${isOpen ? "Hide Errors" : "Show Errors"}</span>
+        <strong>${issueCount}</strong>
+        ${icons.chevronDown}
+      </button>
+      <div id="${panelId}" class="series-error-panel${isOpen ? "" : " hidden"}">
+        ${
+          lastError
+            ? `<p class="series-error"><strong>Latest scan</strong><span>${escapeHtml(lastError)}</span></p>`
+            : ""
+        }
+        ${
+          failedCount
+            ? `<p class="series-error-note"><strong>${failedCount} failed chapter${failedCount === 1 ? "" : "s"}</strong><span>Open this series and select Failed to inspect or retry individual chapters.</span></p>`
+            : ""
+        }
+      </div>
+    </div>
+  `;
+}
+
 function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
   const isSelected = !state.searchPreview && series.id === state.selectedSeriesId;
   const art = getArtworkForSeries(series);
@@ -900,11 +938,7 @@ function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
           <span>${escapeHtml(formatRelativeTime(series.last_checked_at))}</span>
         </div>
 
-        ${
-          series.last_error
-            ? `<p class="series-error">${escapeHtml(series.last_error)}</p>`
-            : ""
-        }
+        ${renderSeriesErrorDisclosure(series)}
       </div>
     </article>
   `;
@@ -2864,6 +2898,20 @@ listen($("#importLibraryFile"), "change", async (event) => {
 });
 
 listen($("#seriesList"), "click", async (event) => {
+  const errorToggle = event.target.closest("[data-series-error-toggle]");
+  if (errorToggle) {
+    event.preventDefault();
+    event.stopPropagation();
+    const seriesId = Number(errorToggle.dataset.seriesErrorToggle);
+    if (state.openErrorSeriesIds.has(seriesId)) {
+      state.openErrorSeriesIds.delete(seriesId);
+    } else {
+      state.openErrorSeriesIds.add(seriesId);
+    }
+    renderSeries();
+    return;
+  }
+
   const previewCard = event.target.closest("[data-preview-index]");
   if (previewCard) {
     const match = state.sidebarSearchResults.source_matches?.[Number(previewCard.dataset.previewIndex)];
@@ -2885,6 +2933,7 @@ listen($("#seriesList"), "click", async (event) => {
 });
 
 $("#seriesList").addEventListener("keydown", (event) => {
+  if (event.target.closest("[data-series-error-toggle]")) return;
   const card = event.target.closest("[data-series-id], [data-preview-index]");
   if (!card || (event.key !== "Enter" && event.key !== " ")) return;
   event.preventDefault();
