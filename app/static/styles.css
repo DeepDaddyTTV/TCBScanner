@@ -2492,6 +2492,26 @@ input[type="checkbox"] {
     justify-content: flex-start;
   }
 
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .topbar-actions > .toolbar-text-button {
+    padding: 0 6px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .topbar-actions .sync-badge {
+    padding: 0 6px;
+  }
+
+  .theme-selector-trigger {
+    gap: 4px;
+  }
+
   .focus-banner {
     grid-template-columns: 62px minmax(0, 1fr);
     gap: 10px;
