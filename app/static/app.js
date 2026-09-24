@@ -1122,9 +1122,9 @@ function renderSeriesFocus() {
             <span><strong>Interval:</strong><em>${escapeHtml(formatInterval(focusSeries.check_interval_minutes))}</em></span>
           </div>
           <p class="focus-detail focus-detail-naming"><strong>Naming:</strong><span>${escapeHtml(namingPreview)}</span></p>
-          ${tabMarkup}
         </div>
         <div class="focus-art" aria-hidden="true"></div>
+        ${tabMarkup}
       </div>
 
       <div class="focus-actions sr-only" data-series-id="${selected?.id || ""}">
