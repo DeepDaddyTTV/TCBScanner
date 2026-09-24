@@ -200,6 +200,8 @@ svg {
 
 .utility-rail {
   grid-area: tools;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border-left: 1px solid var(--line);
   background: var(--surface);
