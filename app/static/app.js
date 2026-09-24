@@ -122,7 +122,7 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
-const themeKey = "kurabloom-theme-v1";
+const themeKey = "sakurarr-theme-v1";
 const legacyThemeKey = "tcbscanner-theme-v4";
 const themeMediaQuery =
   typeof window.matchMedia === "function"
@@ -2587,7 +2587,7 @@ function seriesMark(title) {
     .trim()
     .split(/\s+/)
     .filter(Boolean);
-  if (!parts.length) return "KB";
+  if (!parts.length) return "SK";
   return parts
     .slice(0, 3)
     .map((part) => part[0])

@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>KuraBloom</title>
+    <title>Sakurarr</title>
     <script>
       (() => {
         const legacy = localStorage.getItem("tcbscanner-theme-v4") || localStorage.getItem("tcbscanner-theme-v3");
-        const saved = localStorage.getItem("kurabloom-theme-v1") || legacy || "dark";
+        const saved = localStorage.getItem("sakurarr-theme-v1") || legacy || "dark";
         const normalized = ["light", "dark", "system"].includes(saved) ? saved : "dark";
         const prefersDark =
           normalized === "system" &&
@@ -17,8 +17,8 @@
         document.documentElement.dataset.theme = normalized === "system" ? (prefersDark ? "dark" : "light") : normalized;
       })();
     </script>
-    <link rel="icon" type="image/svg+xml" href="/static/branding/kurabloom-mark.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260924e" />
+    <link rel="icon" type="image/svg+xml" href="/static/branding/sakurarr-mark.svg" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260924f" />
   </head>
   <body>
     <main class="app-shell">
@@ -26,9 +26,9 @@
         <aside class="library-rail" id="librarySection" aria-label="Tracked library">
           <section class="brand-panel" id="brandPanel">
             <div class="brand-block">
-              <div class="brand-logo" aria-label="KuraBloom">
-                <img src="/static/branding/kurabloom-mark.svg" alt="" />
-                <strong>KuraBloom</strong>
+              <div class="brand-logo" aria-label="Sakurarr">
+                <img src="/static/branding/sakurarr-mark.svg" alt="" />
+                <strong>Sakurarr</strong>
               </div>
               <div class="brand-copy">
                 <p>Manga pages, blooming open.</p>
@@ -198,7 +198,7 @@
           </section>
         </section>
 
-        <aside class="utility-rail" id="toolsSection" aria-label="KuraBloom tools">
+        <aside class="utility-rail" id="toolsSection" aria-label="Sakurarr tools">
           <div class="rail-scroll">
             <section class="panel sidebar-panel" id="sidebarPanel" aria-label="Series sidebar"></section>
 
@@ -316,6 +316,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260924e"></script>
+    <script src="/static/app.js?v=20260924f"></script>
   </body>
 </html>
