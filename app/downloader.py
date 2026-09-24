@@ -334,12 +334,17 @@ def render_naming_template(
         "ChapterName": chapter_title,
         "ChapterFullTitle": chapter_full_title,
         "PageCount": str(page_count),
+        # Backward compatibility for naming formats saved by early releases.
+        "series": series_name,
+        "chapter": chapter_number,
+        "chapter.pad": padded_chapter_number(chapter_number),
+        "chapter.title": chapter_title,
     }
 
     def replace(match: re.Match[str]) -> str:
         return values.get(match.group(1), "")
 
-    rendered = re.sub(r"\{([A-Za-z0-9_]+)\}", replace, template or "{ChapterFullTitle}")
+    rendered = re.sub(r"\{([A-Za-z0-9_.]+)\}", replace, template or "{ChapterFullTitle}")
     rendered = re.sub(r"\s+", " ", rendered).strip(" -_.")
     return safe_component(rendered, safe_component(chapter_full_title, "chapter")) + ".cbz"
 

@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from app.downloader import DownloadCancelled, MangaDownloader, source_chapter_set_conflicts
+from app.downloader import (
+    DownloadCancelled,
+    MangaDownloader,
+    render_naming_template,
+    source_chapter_set_conflicts,
+)
 from app.store import Store
 
 
@@ -114,6 +119,18 @@ class BackupSourceStoreTests(unittest.TestCase):
 
 
 class BackupSourceDownloaderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_naming_tokens_remain_unique(self) -> None:
+        filename = render_naming_template(
+            {"title": "Solo Leveling Ragnarok"},
+            {"chapter_key": "12", "display_title": "Chapter 12 Awakening"},
+            "{series} - Chapter {chapter.pad} - {chapter.title}",
+            42,
+        )
+        self.assertEqual(
+            filename,
+            "Solo Leveling Ragnarok - Chapter 0012 - Awakening.cbz",
+        )
+
     async def test_series_download_can_be_cancelled_for_reset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
