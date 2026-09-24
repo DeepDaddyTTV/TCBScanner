@@ -1,6 +1,6 @@
 # Sakurarr
 
-Manga pages, blooming open. Sakurarr monitors manga and manhwa sources, tracks chapter state, and packages downloads as CBZ archives.
+Manga in bloom. Sakurarr monitors manga and manhwa sources, tracks chapter state, and packages downloads as CBZ archives.
 
 A Docker container that monitors supported public manga and manhwa series pages, downloads chapter images in page order, packages each chapter as a `.cbz` file, and adds the result to a local manga library.
 
