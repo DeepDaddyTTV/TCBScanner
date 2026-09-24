@@ -1981,6 +1981,17 @@ input[type="checkbox"] {
   display: none;
 }
 
+@media (min-width: 821px) and (max-width: 1440px) {
+  .command-bar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .command-meta {
+    justify-content: space-between;
+  }
+}
+
 @media (max-width: 1180px) {
   body,
   .app-shell {

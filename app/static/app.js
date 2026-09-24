@@ -91,6 +91,7 @@ const state = {
   chapterFilter: "all",
   chapterBulkOpen: false,
   lastRefreshAt: null,
+  isFetchingState: false,
   isRefreshing: false,
   seriesArt: {},
   artRequests: new Set(),
@@ -650,10 +651,17 @@ async function fetchCoreState() {
   pruneSelectedChapters();
 }
 
-async function refreshAll({ quiet = false } = {}) {
-  if (state.isRefreshing) return;
-  state.isRefreshing = true;
-  renderShellMeta();
+async function refreshAll({ quiet = false, background = false } = {}) {
+  if (state.isFetchingState) {
+    if (!background && !state.isRefreshing) {
+      state.isRefreshing = true;
+      renderShellMeta();
+    }
+    return;
+  }
+  state.isFetchingState = true;
+  state.isRefreshing = !background;
+  if (state.isRefreshing) renderShellMeta();
   try {
     await fetchCoreState();
     state.lastRefreshAt = new Date();
@@ -665,6 +673,7 @@ async function refreshAll({ quiet = false } = {}) {
   } catch (error) {
     handleError(error, quiet ? "Background refresh failed." : "Unable to refresh scanner state.");
   } finally {
+    state.isFetchingState = false;
     state.isRefreshing = false;
     renderShellMeta();
   }
@@ -3580,5 +3589,5 @@ initTheme();
 renderAll();
 void refreshAll();
 setInterval(() => {
-  void refreshAll({ quiet: true });
+  void refreshAll({ quiet: true, background: true });
 }, 8000);
