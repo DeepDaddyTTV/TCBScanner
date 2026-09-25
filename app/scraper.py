@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from html import unescape
 from pathlib import PurePosixPath
 from time import monotonic
-from urllib.parse import quote_plus, urljoin, urlparse
+from urllib.parse import quote, quote_plus, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -32,6 +32,8 @@ KITSU_API_BASE = "https://kitsu.io/api/edge"
 JIKAN_API_BASE = "https://api.jikan.moe/v4"
 MANGADEX_API_BASE = "https://api.mangadex.org"
 MANGADEX_COVERS_BASE = "https://uploads.mangadex.org/covers"
+ATSUMARU_BASE = "https://atsu.moe"
+ATSUMARU_CDN_BASE = "https://cdn.atsu.moe"
 MANGADEX_MAX_COVER_FETCH = 100
 MANGADEX_ARTWORK_VARIANT_WORDS = {
     "official",
@@ -134,6 +136,10 @@ WEEBCENTRAL_SITES = (
     {"name": "WeebCentral", "domain": "weebcentral.com"},
 )
 
+ATSUMARU_SITES = (
+    {"name": "Atsumaru", "domain": "atsu.moe"},
+)
+
 SUPPORTED_SOURCE_GROUPS = (
     {
         "provider": "tcb",
@@ -174,6 +180,11 @@ SUPPORTED_SOURCE_GROUPS = (
         "provider": "weebcentral",
         "family": "WeebCentral HTML fragments",
         "sites": WEEBCENTRAL_SITES,
+    },
+    {
+        "provider": "atsumaru",
+        "family": "Atsumaru manga catalog and reader API",
+        "sites": ATSUMARU_SITES,
     },
 )
 
@@ -246,6 +257,16 @@ async def fetch_html(url: str) -> str:
         if exc.response.status_code != 403:
             raise
     return await asyncio.to_thread(fetch_html_with_requests, url)
+
+
+async def fetch_json(url: str) -> dict[str, object]:
+    async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("The source returned an unexpected JSON response.")
+    return payload
 
 
 async def post_html(url: str, data: dict[str, str]) -> str:
@@ -714,12 +735,71 @@ async def search_mangaupdates_catalog(query: str, limit: int = 8) -> list[dict[s
     return [item[3] for item in ranked[: max(1, min(limit, 12))]]
 
 
+def atsumaru_catalog_match(document: dict[str, object]) -> dict[str, object]:
+    item_id = str(document.get("id") or "").strip()
+    title = str(document.get("title") or "").strip()
+    raw_poster = document.get("poster")
+    poster_path = str(raw_poster or "").strip()
+    poster_url = urljoin(ATSUMARU_CDN_BASE + "/", poster_path.lstrip("/")) if poster_path else ""
+    titles = [title]
+    other_names = document.get("otherNames")
+    if isinstance(other_names, list):
+        titles.extend(str(value).strip() for value in other_names if str(value).strip())
+    author_names = document.get("authors")
+    authors = [str(value).strip() for value in author_names if str(value).strip()] if isinstance(author_names, list) else []
+    count = document.get("chapterCount")
+    return {
+        "provider": "atsumaru",
+        "id": item_id,
+        "title": title,
+        "url": f"{ATSUMARU_BASE}/manga/{item_id}" if item_id else "",
+        "format": str(document.get("medium") or "").strip(),
+        "status": str(document.get("status") or "").strip(),
+        "country_of_origin": "",
+        "chapter_count": count if isinstance(count, int) and count > 0 else None,
+        "volume_count": None,
+        "cover_image_url": poster_url,
+        "titles": list(dict.fromkeys(titles)),
+        "authors": authors,
+        "year": document.get("year") if isinstance(document.get("year"), int) else None,
+    }
+
+
+async def search_atsumaru_catalog(query: str, limit: int = 8) -> list[dict[str, object]]:
+    cleaned = " ".join(str(query or "").strip().split())
+    if len(cleaned) < 2:
+        return []
+    bounded_limit = max(1, min(limit, 12))
+    payload = await fetch_json(
+        f"{ATSUMARU_BASE}/collections/manga/documents/search"
+        f"?q={quote_plus(cleaned)}&query_by=title,otherNames&limit={bounded_limit}"
+    )
+    hits = payload.get("hits", [])
+    if not isinstance(hits, list):
+        return []
+
+    query_variants = {normalize_artwork_key(cleaned)}
+    ranked: list[tuple[int, str, dict[str, object]]] = []
+    for hit in hits:
+        document = hit.get("document") if isinstance(hit, dict) else None
+        if not isinstance(document, dict) or not document.get("id"):
+            continue
+        catalog_item = atsumaru_catalog_match(document)
+        match_rank = artwork_match_rank(query_variants, catalog_item["titles"])
+        catalog_item["match_score"] = match_rank
+        ranked.append((-match_rank, str(catalog_item.get("title") or "").lower(), catalog_item))
+    ranked.sort(key=lambda item: item[:2])
+    return [item[2] for item in ranked[:bounded_limit]]
+
+
 async def search_catalog(provider: str, query: str, limit: int = 8) -> list[dict[str, object]]:
     normalized_provider = str(provider or "anilist").strip().lower()
     if normalized_provider == "anilist":
         return await search_anilist_catalog(query, limit=limit)
     if normalized_provider == "mangaupdates":
         return await search_mangaupdates_catalog(query, limit=limit)
+    if normalized_provider == "atsumaru":
+        return await search_atsumaru_catalog(query, limit=limit)
     raise ValueError(f"Unsupported catalog provider: {provider}")
 
 
@@ -1322,6 +1402,7 @@ async def discover_chapters(
     source_url: str,
     *,
     request_delay: float = 0.0,
+    preferred_translator: str | None = None,
 ) -> tuple[str, list[dict[str, object]]]:
     provider = detect_provider(source_url)
     if provider == "tcb":
@@ -1340,6 +1421,12 @@ async def discover_chapters(
         return await discover_kuramanga_chapters(source_url, request_delay=request_delay)
     if provider == "weebcentral":
         return await discover_weebcentral_chapters(source_url, request_delay=request_delay)
+    if provider == "atsumaru":
+        return await discover_atsumaru_chapters(
+            source_url,
+            preferred_translator=preferred_translator,
+            request_delay=request_delay,
+        )
     raise ValueError("This site is not in the current supported source list.")
 
 
@@ -1348,6 +1435,8 @@ async def discover_page_images(
     *,
     request_delay: float = 0.0,
 ) -> list[dict[str, object]]:
+    if detect_provider(chapter_url) == "atsumaru":
+        return await discover_atsumaru_page_images(chapter_url, request_delay=request_delay)
     html = await fetch_html(chapter_url)
     if detect_provider(chapter_url) == "weebcentral":
         images_url = derive_weebcentral_images_url(chapter_url)
@@ -1378,6 +1467,154 @@ def parse_page_images(html: str, base_url: str) -> list[dict[str, object]]:
     if provider == "weebcentral":
         return parse_weebcentral_page_images(html, base_url)
     raise ValueError("This chapter source is not supported.")
+
+
+def atsumaru_manga_id(source_url: str) -> str:
+    parts = [part for part in urlparse(source_url).path.split("/") if part]
+    if not parts or parts[0].lower() not in {"manga", "read"} or len(parts) < 2:
+        raise ValueError("Use an Atsumaru manga URL such as https://atsu.moe/manga/4xYnd.")
+    if parts[0].lower() == "read" and len(parts) < 3:
+        raise ValueError("Use a complete Atsumaru reader URL to resolve a chapter link.")
+    return parts[1]
+
+
+async def atsumaru_source_data(source_url: str) -> tuple[str, dict[str, object], dict[str, object]]:
+    manga_id = atsumaru_manga_id(source_url)
+    encoded_id = quote(manga_id, safe="")
+    page_payload, info_payload = await asyncio.gather(
+        fetch_json(f"{ATSUMARU_BASE}/api/manga/page?id={encoded_id}"),
+        fetch_json(f"{ATSUMARU_BASE}/api/manga/info?mangaId={encoded_id}"),
+    )
+    manga = page_payload.get("mangaPage")
+    info = info_payload
+    if not isinstance(manga, dict) or not isinstance(info.get("chapters"), list):
+        raise ValueError("Atsumaru did not return a manga page or chapter list.")
+    return manga_id, manga, info
+
+
+async def atsumaru_source_options(source_url: str) -> list[dict[str, str]]:
+    _, manga, _ = await atsumaru_source_data(source_url)
+    scanlators = manga.get("scanlators")
+    if not isinstance(scanlators, list):
+        return []
+    return [
+        {"id": str(item.get("id") or ""), "name": str(item.get("name") or "").strip()}
+        for item in scanlators
+        if isinstance(item, dict) and item.get("id") and str(item.get("name") or "").strip()
+    ]
+
+
+async def discover_atsumaru_chapters(
+    source_url: str,
+    *,
+    preferred_translator: str | None = None,
+    request_delay: float = 0.0,
+) -> tuple[str, list[dict[str, object]]]:
+    manga_id, manga, info = await atsumaru_source_data(source_url)
+    if request_delay > 0:
+        await asyncio.sleep(request_delay)
+
+    scanlators = manga.get("scanlators")
+    scanlator_rows = scanlators if isinstance(scanlators, list) else []
+    scanlator_by_name = {
+        str(item.get("name") or "").strip().casefold(): str(item.get("id") or "").strip()
+        for item in scanlator_rows
+        if isinstance(item, dict) and item.get("id") and item.get("name")
+    }
+    source_preference = manga.get("sourcePreference")
+    default_scanlator_id = (
+        str(source_preference.get("scanlationMangaId") or "").strip()
+        if isinstance(source_preference, dict)
+        else ""
+    )
+    if not default_scanlator_id and scanlator_rows and isinstance(scanlator_rows[0], dict):
+        default_scanlator_id = str(scanlator_rows[0].get("id") or "").strip()
+
+    requested_name = str(preferred_translator or "").strip()
+    requested_id = scanlator_by_name.get(requested_name.casefold(), "")
+    rows = info.get("chapters", [])
+    source_chapter_count = manga.get("totalChapterCount")
+    source_chapter_count = (
+        source_chapter_count if isinstance(source_chapter_count, int) and source_chapter_count > 0 else None
+    )
+    by_chapter: dict[str, list[dict[str, object]]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("id"):
+            continue
+        chapter_title = str(row.get("title") or "").strip()
+        chapter_key, sort_key = parse_chapter_key(chapter_title, str(row.get("id")))
+        by_chapter.setdefault(chapter_key, []).append({**row, "_chapter_key": chapter_key, "_sort_key": sort_key})
+
+    chapters: list[dict[str, object]] = []
+    for chapter_key, versions in by_chapter.items():
+        selected = next(
+            (row for row in versions if requested_id and str(row.get("scanId") or "") == requested_id),
+            None,
+        )
+        if selected is None:
+            selected = next(
+                (row for row in versions if default_scanlator_id and str(row.get("scanId") or "") == default_scanlator_id),
+                versions[0],
+            )
+        chosen_scanlator_id = str(selected.get("scanId") or "")
+        chosen_scanlator = next(
+            (
+                str(item.get("name") or "").strip()
+                for item in scanlator_rows
+                if isinstance(item, dict) and str(item.get("id") or "") == chosen_scanlator_id
+            ),
+            "",
+        )
+        title = str(selected.get("title") or f"Chapter {chapter_key}").strip()
+        chapters.append(
+            {
+                "url": f"{ATSUMARU_BASE}/read/{quote(manga_id, safe='')}/{quote(str(selected['id']), safe='')}",
+                "title": title,
+                "chapter_key": chapter_key,
+                "sort_key": float(selected.get("_sort_key") or 0),
+                "translator": chosen_scanlator,
+                "preferred_translator": requested_name or "auto",
+                "page_count": selected.get("pageCount") if isinstance(selected.get("pageCount"), int) else 0,
+                "source_chapter_count": source_chapter_count,
+            }
+        )
+
+    chapters.sort(key=lambda item: (float(item.get("sort_key") or 0), str(item.get("url") or "")))
+    if not chapters:
+        raise ValueError("No chapters were found in this Atsumaru series.")
+    return f"{ATSUMARU_BASE}/manga/{quote(manga_id, safe='')}", chapters
+
+
+async def discover_atsumaru_page_images(
+    chapter_url: str,
+    *,
+    request_delay: float = 0.0,
+) -> list[dict[str, object]]:
+    parts = [part for part in urlparse(chapter_url).path.split("/") if part]
+    if len(parts) < 3 or parts[0].lower() != "read":
+        raise ValueError("Use an Atsumaru reader URL for a chapter source.")
+    manga_id, chapter_id = quote(parts[1], safe=""), quote(parts[2], safe="")
+    if request_delay > 0:
+        await asyncio.sleep(request_delay)
+    payload = await fetch_json(
+        f"{ATSUMARU_BASE}/api/read/chapter?mangaId={manga_id}&chapterId={chapter_id}"
+    )
+    read_chapter = payload.get("readChapter")
+    pages = read_chapter.get("pages") if isinstance(read_chapter, dict) else None
+    if not isinstance(pages, list):
+        raise ValueError("Atsumaru did not return chapter pages.")
+    images: list[dict[str, object]] = []
+    for page in pages:
+        if not isinstance(page, dict) or not page.get("image"):
+            continue
+        images.append(
+            {
+                "url": urljoin(ATSUMARU_CDN_BASE + "/", str(page["image"]).lstrip("/")),
+                "index": page.get("number") if isinstance(page.get("number"), int) else len(images),
+                "filename": f"{len(images) + 1:03}.avif",
+            }
+        )
+    return sorted(images, key=lambda item: int(item.get("index") or 0))
 
 
 async def discover_tcb_chapters(
@@ -2692,7 +2929,7 @@ def parse_page_number(text: str) -> int | None:
 
 def extension_from_url(url: str) -> str:
     suffix = PurePosixPath(urlparse(url).path).suffix.lower().lstrip(".")
-    if suffix in {"jpg", "jpeg", "png", "webp", "gif"}:
+    if suffix in {"jpg", "jpeg", "png", "webp", "gif", "avif"}:
         return "jpg" if suffix == "jpeg" else suffix
     return "jpg"
 
@@ -2704,6 +2941,7 @@ def extension_from_content_type(content_type: str, fallback: str) -> str:
         "image/jpg": "jpg",
         "image/png": "png",
         "image/webp": "webp",
+        "image/avif": "avif",
         "image/gif": "gif",
     }
     return mapping.get(lowered, fallback)
@@ -2734,6 +2972,9 @@ def is_chapter_url(url: str) -> bool:
         return is_kuramanga_chapter_url(url)
     if provider == "weebcentral":
         return is_weebcentral_chapter_url(url)
+    if provider == "atsumaru":
+        parts = [part for part in urlparse(url).path.split("/") if part]
+        return len(parts) >= 3 and parts[0].lower() == "read"
     return False
 
 

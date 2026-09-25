@@ -31,6 +31,7 @@ SCAN_TIME_ZONE = ZoneInfo("America/New_York")
 METADATA_PROVIDERS = [
     {"id": "anilist", "name": "AniList"},
     {"id": "mangaupdates", "name": "MangaUpdates"},
+    {"id": "atsumaru", "name": "Atsumaru"},
 ]
 NAMING_VARIABLES = [
     {
@@ -149,6 +150,7 @@ class SeriesCreate(BaseModel):
     poster_image_url: str | None = Field(default=None, max_length=1200)
     metadata_provider: str | None = Field(default=None, max_length=40)
     metadata_provider_override: str | None = Field(default=None, max_length=40)
+    preferred_translator: str = Field(default="auto", max_length=120)
     metadata_id: str | None = Field(default=None, max_length=80)
     metadata_title: str | None = Field(default=None, max_length=240)
     metadata_url: str | None = Field(default=None, max_length=1200)
@@ -191,9 +193,14 @@ class SeriesCreate(BaseModel):
         cleaned = str(value or "").strip().lower()
         if not cleaned:
             return None
-        if cleaned not in {"anilist", "mangaupdates"}:
-            raise ValueError("Choose AniList or MangaUpdates as the metadata provider.")
+        if cleaned not in {"anilist", "mangaupdates", "atsumaru"}:
+            raise ValueError("Choose AniList, MangaUpdates, or Atsumaru as the metadata provider.")
         return cleaned
+
+    @field_validator("preferred_translator")
+    @classmethod
+    def normalize_preferred_translator(cls, value: str) -> str:
+        return " ".join(str(value or "auto").strip().split()) or "auto"
 
     @field_validator("metadata_url")
     @classmethod
@@ -229,8 +236,8 @@ class SettingsUpdate(BaseModel):
     @classmethod
     def validate_default_metadata_provider(cls, value: str) -> str:
         cleaned = str(value or "").strip().lower()
-        if cleaned not in {"anilist", "mangaupdates"}:
-            raise ValueError("Choose AniList or MangaUpdates as the metadata provider.")
+        if cleaned not in {"anilist", "mangaupdates", "atsumaru"}:
+            raise ValueError("Choose AniList, MangaUpdates, or Atsumaru as the metadata provider.")
         return cleaned
 
 
@@ -321,6 +328,19 @@ async def get_artwork(title: str, source_url: str) -> dict[str, Any]:
     return await scraper.resolve_series_artwork(cleaned_title, cleaned_url)
 
 
+@app.get("/api/source-options")
+async def get_source_options(url: str) -> dict[str, Any]:
+    cleaned_url = str(url or "").strip()
+    provider = scraper.detect_provider(cleaned_url)
+    if provider != "atsumaru":
+        return {"provider": provider or "", "translators": []}
+    try:
+        translators = await scraper.atsumaru_source_options(cleaned_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Unable to load Atsumaru translator groups.") from exc
+    return {"provider": provider, "translators": translators}
+
+
 @app.get("/api/metadata/anilist")
 async def search_anilist_metadata(query: str, limit: int = 8) -> dict[str, Any]:
     cleaned = " ".join(str(query or "").strip().split())
@@ -341,7 +361,7 @@ async def search_catalog_metadata(
 ) -> dict[str, Any]:
     cleaned = " ".join(str(query or "").strip().split())
     normalized_provider = str(provider or "anilist").strip().lower()
-    if normalized_provider not in {"anilist", "mangaupdates"}:
+    if normalized_provider not in {"anilist", "mangaupdates", "atsumaru"}:
         raise HTTPException(status_code=400, detail="Unsupported metadata provider.")
     if len(cleaned) < 2:
         return {"query": cleaned, "provider": normalized_provider, "matches": []}
@@ -352,7 +372,10 @@ async def search_catalog_metadata(
             limit=max(1, min(limit, 12)),
         )
     except Exception as exc:
-        provider_name = "AniList" if normalized_provider == "anilist" else "MangaUpdates"
+        provider_name = next(
+            (item["name"] for item in METADATA_PROVIDERS if item["id"] == normalized_provider),
+            "Metadata provider",
+        )
         raise HTTPException(status_code=502, detail=f"{provider_name} metadata lookup failed.") from exc
     return {"query": cleaned, "provider": normalized_provider, "matches": matches}
 

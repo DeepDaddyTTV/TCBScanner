@@ -73,6 +73,7 @@ const state = {
     metadata_providers: [
       { id: "anilist", name: "AniList" },
       { id: "mangaupdates", name: "MangaUpdates" },
+      { id: "atsumaru", name: "Atsumaru" },
     ],
   },
   selectedSeriesId: null,
@@ -95,6 +96,7 @@ const state = {
   isRefreshing: false,
   seriesArt: {},
   artRequests: new Set(),
+  sourceOptions: { url: "", provider: "", translators: [], loading: false, message: "" },
   libraryFilter: "",
   focusTab: "chapters",
   sidebarMode: "discover",
@@ -362,6 +364,7 @@ function defaultSeriesDraft(overrides = {}) {
     backup_source_urls: "",
     metadata_provider: "",
     metadata_provider_override: "",
+    preferred_translator: "auto",
     metadata_id: "",
     metadata_title: "",
     metadata_url: "",
@@ -384,6 +387,7 @@ function seriesToDraft(series) {
     backup_source_urls: normalizeBackupSourceUrls(series.backup_source_urls).join("\n"),
     metadata_provider: String(series.metadata_provider || ""),
     metadata_provider_override: String(series.metadata_provider_override || ""),
+    preferred_translator: String(series.preferred_translator || "auto"),
     metadata_id: String(series.metadata_id || ""),
     metadata_title: String(series.metadata_title || ""),
     metadata_url: String(series.metadata_url || ""),
@@ -459,6 +463,9 @@ function buildSeriesFromDraft(draft, fallback = {}) {
         "metadata_provider_override",
         fallback.metadata_provider_override || "",
       ),
+    ),
+    preferred_translator: String(
+      readDraftValue(draft, "preferred_translator", fallback.preferred_translator || "auto"),
     ),
     metadata_id: String(readDraftValue(draft, "metadata_id", fallback.metadata_id || "")),
     metadata_title: String(readDraftValue(draft, "metadata_title", fallback.metadata_title || "")),
@@ -1332,6 +1339,9 @@ function catalogFallbackUrl(provider, id) {
   if (String(provider || "").toLowerCase() === "anilist") {
     return `https://anilist.co/manga/${id}`;
   }
+  if (String(provider || "").toLowerCase() === "atsumaru") {
+    return `https://atsu.moe/manga/${encodeURIComponent(id)}`;
+  }
   return "";
 }
 
@@ -1672,6 +1682,7 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
         <span>Source URL</span>
         <input name="source_url" type="url" required value="${escapeHtml(safeDraft.source_url)}" placeholder="https://example.com/manga" />
       </label>
+      ${renderAtsumaruTranslatorPicker(safeDraft)}
       <label class="field-span">
         <span>Backup source URLs</span>
         <textarea name="backup_source_urls" rows="3" placeholder="One supported series URL per line">${escapeHtml(normalizeBackupSourceUrls(safeDraft.backup_source_urls).join("\n"))}</textarea>
@@ -1716,6 +1727,34 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
         <span>${escapeHtml(submitLabel)}</span>
       </button>
     </form>
+  `;
+}
+
+function renderAtsumaruTranslatorPicker(draft) {
+  if (!/^https?:\/\/(?:[^/]+\.)?atsu\.moe\//i.test(String(draft.source_url || ""))) return "";
+  const sourceOptions = state.sourceOptions.url === draft.source_url ? state.sourceOptions : null;
+  const translators = sourceOptions?.translators || [];
+  const selected = String(draft.preferred_translator || "auto");
+  return `
+    <div class="field-span">
+      <div class="settings-section-heading">
+        <div>
+          <h3>Preferred translator</h3>
+          <p>Choose an Atsumaru group; unavailable chapters fall back to the recommended group.</p>
+        </div>
+        <button class="small-action compact-action" type="button" data-sidebar-action="load-source-options" ${sourceOptions?.loading ? "disabled" : ""}>
+          <span>${sourceOptions?.loading ? "Scanning…" : "Scan translators"}</span>
+        </button>
+      </div>
+      <label>
+        Preferred translator
+        <select name="preferred_translator">
+          <option value="auto" ${selected.toLowerCase() === "auto" ? "selected" : ""}>Recommended (Atsumaru default)</option>
+          ${translators.map((item) => `<option value="${escapeHtml(item.name)}" ${item.name === selected ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
+        </select>
+      </label>
+      ${sourceOptions?.message ? `<p class="field-hint">${escapeHtml(sourceOptions.message)}</p>` : ""}
+    </div>
   `;
 }
 
@@ -2849,6 +2888,7 @@ function readSeriesFormPayload(form) {
   return {
     source_url: String(formData.get("source_url") || "").trim(),
     backup_source_urls: normalizeBackupSourceUrls(formData.get("backup_source_urls")),
+    preferred_translator: String(formData.get("preferred_translator") || "auto").trim() || "auto",
     metadata_provider: String(formData.get("metadata_provider") || "").trim() || null,
     metadata_provider_override:
       String(formData.get("metadata_provider_override") || "").trim() || null,
@@ -2868,6 +2908,7 @@ function normalizeSeriesPayload(payload) {
   return {
     ...payload,
     backup_source_urls: normalizeBackupSourceUrls(payload.backup_source_urls),
+    preferred_translator: String(payload.preferred_translator || "auto").trim() || "auto",
     naming_format: payload.naming_format || null,
   };
 }
@@ -2891,6 +2932,7 @@ function syncDraftFromPayload(payload, mode) {
     title: payload.title,
     source_url: payload.source_url,
     backup_source_urls: normalizeBackupSourceUrls(payload.backup_source_urls).join("\n"),
+    preferred_translator: payload.preferred_translator || "auto",
     metadata_provider: payload.metadata_provider || "",
     metadata_provider_override: payload.metadata_provider_override || "",
     metadata_id: payload.metadata_id || "",
@@ -3431,6 +3473,44 @@ listen($("#sidebarPanel"), "click", async (event) => {
 
   const actionButton = event.target.closest("[data-sidebar-action]");
   const selected = getSelectedSeries();
+  if (actionButton?.dataset.sidebarAction === "load-source-options") {
+    const form = $("#sidebarPanel #seriesForm");
+    if (!form || state.sourceOptions.loading) return;
+    const mode = form.dataset.mode || "create";
+    const payload = normalizeSeriesPayload(readSeriesFormPayload(form));
+    syncDraftFromPayload(payload, mode);
+    state.sourceOptions = {
+      url: payload.source_url,
+      provider: "atsumaru",
+      translators: [],
+      loading: true,
+      message: "Loading the available translator groups from Atsumaru…",
+    };
+    renderSidebar();
+    try {
+      const result = await api(`/api/source-options?url=${encodeURIComponent(payload.source_url)}`);
+      const translators = result.translators || [];
+      state.sourceOptions = {
+        url: payload.source_url,
+        provider: result.provider || "",
+        translators,
+        loading: false,
+        message: translators.length
+          ? `${translators.length} translator group${translators.length === 1 ? "" : "s"} found. Preference applies to future scans.`
+          : "No translator groups were returned for this source.",
+      };
+    } catch (error) {
+      state.sourceOptions = {
+        url: payload.source_url,
+        provider: "atsumaru",
+        translators: [],
+        loading: false,
+        message: error.message || "Unable to read Atsumaru translator groups.",
+      };
+    }
+    renderSidebar();
+    return;
+  }
   if (actionButton?.dataset.sidebarAction === "search-catalog") {
     const form = $("#sidebarPanel #seriesForm");
     if (!form || state.catalogSearching) return;

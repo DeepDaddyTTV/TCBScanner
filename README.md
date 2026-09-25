@@ -74,7 +74,7 @@ Downloads interrupted by a container or host restart are automatically returned 
 
 ## Supported Sites
 
-The current release supports 30 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.
+The current release supports 31 domains. This rollout keeps the easy public HTML-compatible sources from the EverythingMoe manga and manhwa lists, and now adds coverage for a few more live structures that do not use the original TCB layout.
 
 | Site | Domain | Provider family |
 | --- | --- | --- |
@@ -108,6 +108,7 @@ The current release supports 30 domains. This rollout keeps the easy public HTML
 | [ManhwaHub](https://manhwahub.net/) | `manhwahub.net` | Webtoon portal HTML |
 | [KuraManga](https://kuramanga.com/) | `kuramanga.com` | Flat series slug HTML |
 | [WeebCentral](https://weebcentral.com/) | `weebcentral.com` | WeebCentral HTML fragments |
+| [Atsumaru](https://atsu.moe/) | `atsu.moe` | Atsumaru catalog and reader API |
 
 If a supported site changes its markup or introduces stricter bot protection, that site may need a provider refresh before scans succeed again.
 
@@ -143,7 +144,8 @@ Fields:
 
 - `Source URL`: Primary series page checked first.
 - `Backup source URLs`: Optional alternate supported series pages, one per line. The primary source wins when both sites list the same chapter; backups fill missing chapters and take over when the primary cannot be reached or parsed.
-- `Metadata provider override`: Use the global AniList or MangaUpdates default, or choose a different provider for this series. Metadata matching does not replace or change the configured source pages.
+- `Preferred translator`: For Atsumaru series, scan the source to list available translator groups and choose the preferred group. If it has no translation for a chapter, Atsumaru's recommended group is used for that chapter.
+- `Metadata provider override`: Use the global AniList, MangaUpdates, or Atsumaru default, or choose a different provider for this series. Metadata matching does not replace or change the configured source pages.
 - `Library title`: Used for chapter file names when the source title is missing.
 - `Folder`: Select a destination under a configured root such as `/manga` or `/manhwa`. Leave the title portion unchanged to use the library title.
 - `Daily scan time`: One global time for checking every monitored series, configured in Settings. Defaults to 8:00 PM Eastern Time.
@@ -162,7 +164,7 @@ Series settings include a `Clear index and rescan` control for repairing a bad m
 
 Open the options menu in the web app to set the default CBZ naming format for every series. Each series card also has a `Naming format` field; leave it blank to use the default, or set a series-specific override.
 
-The same global settings panel selects the default metadata provider. Individual series may inherit that default or override it without changing their primary or backup source URLs.
+The same global settings panel selects AniList, MangaUpdates, or Atsumaru as the default metadata provider. Individual series may inherit that default or override it without changing their primary or backup source URLs.
 
 The settings drawer also includes full-library JSON export/import controls. Import replaces the existing library, chapter index, activity history, and saved settings, so it works best for backups or sharing a full curated library state.
 
@@ -197,7 +199,8 @@ Unknown variables are ignored. File names are sanitized before writing to the ma
 - `GET /api/meta`
 - `GET /api/settings`
 - `POST /api/settings`
-- `GET /api/metadata/catalog?provider=anilist|mangaupdates&query=...`
+- `GET /api/metadata/catalog?provider=anilist|mangaupdates|atsumaru&query=...`
+- `GET /api/source-options?url=...`
 - `GET /api/library/export`
 - `POST /api/library/import`
 - `DELETE /api/series/{series_id}`

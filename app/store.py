@@ -15,7 +15,7 @@ def utc_now() -> str:
 
 DEFAULT_NAMING_FORMAT = "{ChapterFullTitle}"
 LEGACY_DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
-SNAPSHOT_SCHEMA_VERSION = 4
+SNAPSHOT_SCHEMA_VERSION = 5
 
 
 def normalize_backup_source_urls(value: Any) -> list[str]:
@@ -127,6 +127,7 @@ class Store:
             self._ensure_column("series", "metadata_title", "TEXT")
             self._ensure_column("series", "metadata_url", "TEXT")
             self._ensure_column("series", "metadata_chapter_count", "INTEGER")
+            self._ensure_column("series", "preferred_translator", "TEXT NOT NULL DEFAULT 'auto'")
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO settings (key, value)
@@ -164,9 +165,9 @@ class Store:
                     enabled, backfill_existing, initialized, created_at, naming_format,
                     poster_image_url, backup_source_urls, metadata_provider,
                     metadata_provider_override, metadata_id, metadata_title,
-                    metadata_url, metadata_chapter_count
+                    metadata_url, metadata_chapter_count, preferred_translator
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["title"],
@@ -185,6 +186,7 @@ class Store:
                     payload.get("metadata_title") or None,
                     payload.get("metadata_url") or None,
                     payload.get("metadata_chapter_count"),
+                    payload.get("preferred_translator") or "auto",
                 ),
             )
             series_id = int(cur.lastrowid)
@@ -210,7 +212,8 @@ class Store:
                     metadata_id = ?,
                     metadata_title = ?,
                     metadata_url = ?,
-                    metadata_chapter_count = ?
+                    metadata_chapter_count = ?,
+                    preferred_translator = ?
                 WHERE id = ?
                 """,
                 (
@@ -229,6 +232,7 @@ class Store:
                     payload.get("metadata_title") or None,
                     payload.get("metadata_url") or None,
                     payload.get("metadata_chapter_count"),
+                    payload.get("preferred_translator") or "auto",
                     series_id,
                 ),
             )
@@ -761,9 +765,10 @@ class Store:
                         enabled, backfill_existing, initialized, created_at,
                         last_checked_at, last_error, naming_format, poster_image_url,
                         backup_source_urls, metadata_provider, metadata_provider_override,
-                        metadata_id, metadata_title, metadata_url, metadata_chapter_count
+                        metadata_id, metadata_title, metadata_url, metadata_chapter_count,
+                        preferred_translator
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -787,6 +792,7 @@ class Store:
                             row.get("metadata_title"),
                             row.get("metadata_url"),
                             row.get("metadata_chapter_count"),
+                            row.get("preferred_translator") or "auto",
                         )
                         for row in snapshot["series"]
                     ],
@@ -988,6 +994,9 @@ class Store:
                         row.get("metadata_chapter_count"),
                         "Series metadata chapter count",
                     ),
+                    "preferred_translator": self._optional_compact_text(
+                        row.get("preferred_translator") or "auto"
+                    ) or "auto",
                 }
             )
         return normalized

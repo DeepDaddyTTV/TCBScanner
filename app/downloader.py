@@ -105,10 +105,19 @@ class MangaDownloader:
         if series_id in self._cancelled_series:
             raise DownloadCancelled("Series download canceled for reset.")
 
-    async def _discover_chapters(self, source_url: str) -> tuple[str, list[dict[str, object]]]:
+    async def _discover_chapters(
+        self,
+        source_url: str,
+        *,
+        preferred_translator: str | None = None,
+    ) -> tuple[str, list[dict[str, object]]]:
         if not scraper.host_is_supported(source_url):
             raise ValueError("This site is not in the current supported source list.")
-        return await scraper.discover_chapters(source_url, request_delay=self.request_delay)
+        return await scraper.discover_chapters(
+            source_url,
+            request_delay=self.request_delay,
+            preferred_translator=preferred_translator,
+        )
 
     async def _discover_series_chapters(
         self,
@@ -129,7 +138,10 @@ class MangaDownloader:
 
         for index, source_url in enumerate(candidates):
             try:
-                resolved_url, chapters = await self._discover_chapters(source_url)
+                resolved_url, chapters = await self._discover_chapters(
+                    source_url,
+                    preferred_translator=str(series.get("preferred_translator") or "auto"),
+                )
             except Exception as exc:  # noqa: BLE001 - try the next configured source
                 host = urlparse(source_url).netloc or source_url
                 failures.append(f"{host}: {exc}")
@@ -311,7 +323,17 @@ def source_chapter_set_conflicts(
         except (TypeError, ValueError):
             continue
     highest = max(numeric_keys, default=0)
-    return len(chapters) > expected_count + tolerance or highest > expected_count + tolerance
+    reported_count = next(
+        (
+            int(chapter.get("source_chapter_count"))
+            for chapter in chapters
+            if isinstance(chapter.get("source_chapter_count"), int)
+            and int(chapter.get("source_chapter_count") or 0) > 0
+        ),
+        None,
+    )
+    observed_count = reported_count if reported_count is not None else len(chapters)
+    return observed_count > expected_count + tolerance or highest > expected_count + tolerance
 
 
 def render_naming_template(
