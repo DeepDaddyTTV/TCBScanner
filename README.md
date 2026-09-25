@@ -13,7 +13,7 @@ Use this compose file as a starting point:
 ```yaml
 services:
   tcbscanner:
-    image: ghcr.io/deepdaddyttv/tcbscanner:latest
+    image: ghcr.io/deepdaddyttv/sakurarr:latest
     container_name: tcb_scanner
     restart: unless-stopped
     user: "0:0"
@@ -49,7 +49,7 @@ Open [http://localhost:18080](http://localhost:18080).
 
 Compose settings:
 
-- `image`: Published container image. Use `ghcr.io/deepdaddyttv/tcbscanner:latest` for the current release.
+- `image`: Published container image. Use `ghcr.io/deepdaddyttv/sakurarr:latest` for the current release.
 - `container_name`: Friendly Docker container name.
 - `restart`: Keeps the scanner running after Docker or host restarts.
 - `user`: Runs the container as `root` by default so mounted manga folders can be written even when the host folder owner does not match a container user.
@@ -68,7 +68,7 @@ Supported environment variables:
 - `WORK_DIR`: Container path for temporary image downloads before packaging. Default: `/data/work`.
 - `TCB_SCHEDULER_INTERVAL_HOURS`: How often the background scheduler wakes up to look for due series, in hours. Default: `1`.
 - `TCB_REQUEST_DELAY`: Delay between source requests, in seconds. Default: `0.8`.
-- `APP_VERSION`: Version label shown in the footer. The GitHub image pipeline sets this automatically as `0.2.x`, where `x` is the current repo revision count.
+- `APP_VERSION`: Version label shown in the footer. The GitHub image pipeline reads the release version from the root `VERSION` file.
 
 Downloads interrupted by a container or host restart are automatically returned to the pending queue when the app starts again.
 
