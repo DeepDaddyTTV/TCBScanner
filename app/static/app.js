@@ -124,6 +124,10 @@ const state = {
   catalogMatches: [],
   catalogSearching: false,
   catalogMessage: "",
+  localFolderBrowse: null,
+  localImportFolder: "",
+  localImportMessage: "",
+  localImportBusy: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -373,6 +377,7 @@ function defaultSeriesDraft(overrides = {}) {
     naming_format: "",
     enabled: true,
     backfill_existing: false,
+    local_only: false,
     ...overrides,
   };
 }
@@ -396,6 +401,7 @@ function seriesToDraft(series) {
     naming_format: String(series.naming_format || ""),
     enabled: Boolean(series.enabled),
     backfill_existing: Boolean(series.backfill_existing),
+    local_only: Boolean(series.local_only),
   });
 }
 
@@ -480,6 +486,7 @@ function buildSeriesFromDraft(draft, fallback = {}) {
     poster_image_url: String(readDraftValue(draft, "poster_image_url", fallback.poster_image_url || "")),
     enabled: Boolean(readDraftValue(draft, "enabled", fallback.enabled)),
     backfill_existing: Boolean(readDraftValue(draft, "backfill_existing", fallback.backfill_existing)),
+    local_only: Boolean(readDraftValue(draft, "local_only", fallback.local_only)),
   };
 }
 
@@ -986,7 +993,7 @@ function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
         <div class="series-top">
           <div class="series-copy">
             <h3>${escapeHtml(series.title)}</h3>
-            <p>${escapeHtml(getHostLabel(series.source_url))}</p>
+            <p>${escapeHtml(series.local_only ? "Local only" : getHostLabel(series.source_url))}</p>
           </div>
           <span class="status-pill status-${series.enabled ? "enabled" : "paused"}">
             ${series.enabled ? "Monitored" : "Paused"}
@@ -1086,7 +1093,7 @@ function renderSeriesFocus() {
     ? ` style="--focus-art: url('${focusArtUrl.replaceAll("'", "%27")}')"`
     : "";
   const namingPreview = getNamingPreview(focusSeries);
-  const sourceDisplay = formatSourceDisplay(focusSeries.source_url);
+  const sourceDisplay = focusSeries.local_only ? "Local-only import" : formatSourceDisplay(focusSeries.source_url);
   const folderDisplay = formatFolderDisplay(focusSeries.folder || focusSeries.title);
   const focusIdentity = isPreview
     ? 'data-preview="true"'
@@ -1121,9 +1128,7 @@ function renderSeriesFocus() {
           </div>
           <p class="focus-detail focus-detail-source">
             <strong>Source:</strong>
-            <a class="focus-link" href="${escapeHtml(focusSeries.source_url)}" target="_blank" rel="noreferrer">
-              ${escapeHtml(sourceDisplay)}
-            </a>
+            ${focusSeries.source_url ? `<a class="focus-link" href="${escapeHtml(focusSeries.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(sourceDisplay)}</a>` : `<span>${escapeHtml(sourceDisplay)}</span>`}
           </p>
           <div class="focus-detail-grid">
             <span><strong>Library:</strong><em>${escapeHtml(focusSeries.title)}</em></span>
@@ -1138,13 +1143,13 @@ function renderSeriesFocus() {
 
       <div class="focus-actions sr-only" data-series-id="${selected?.id || ""}">
         <label class="monitor-toggle compact">
-          <input type="checkbox" data-action="monitor" ${focusSeries.enabled ? "checked" : ""} />
-          <span>${focusSeries.enabled ? "Monitor new chapters automatically" : "Series is currently paused"}</span>
+          <input type="checkbox" data-action="monitor" ${focusSeries.enabled ? "checked" : ""} ${focusSeries.local_only ? "disabled" : ""} />
+          <span>${focusSeries.local_only ? "Add a source URL in Settings to enable monitoring" : focusSeries.enabled ? "Monitor new chapters automatically" : "Series is currently paused"}</span>
         </label>
 
         <div class="focus-action-row">
-          <button class="small-action" data-action="check">${icons.check}<span>Check now</span></button>
-          <button class="small-action" data-action="download">${icons.download}<span>Queue missing</span></button>
+          <button class="small-action" data-action="check" ${focusSeries.local_only ? "disabled" : ""}>${icons.check}<span>Check now</span></button>
+          <button class="small-action" data-action="download" ${focusSeries.local_only ? "disabled" : ""}>${icons.download}<span>Queue missing</span></button>
           <button class="small-action danger-action" data-action="delete">${icons.trash}<span>Delete series</span></button>
         </div>
       </div>
@@ -1158,6 +1163,10 @@ function renderSidebar() {
 
   const selected = getSelectedSeries();
   const preview = getPreviewSeries();
+  if (state.sidebarMode === "local-import") {
+    panel.innerHTML = renderLocalImportSidebar();
+    return;
+  }
   if (state.sidebarMode === "settings") {
     ensureEditDraft();
   }
@@ -1209,6 +1218,85 @@ function renderSidebar() {
   }
 
   panel.innerHTML = renderChaptersSidebar(selected);
+}
+
+async function browseLocalFolders(path = "") {
+  state.localImportMessage = "";
+  try {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    state.localFolderBrowse = await api(`/api/library/folders${query}`);
+  } catch (error) {
+    state.localImportMessage = error.message || "Unable to browse library folders.";
+  }
+  renderSidebar();
+}
+
+async function openLocalImport() {
+  state.localFolderBrowse = null;
+  state.localImportFolder = "";
+  state.localImportMessage = "";
+  state.localImportBusy = false;
+  clearSearchPreview({ resetDraft: true });
+  setSidebarMode("local-import");
+  renderAll();
+  await browseLocalFolders();
+}
+
+function renderLocalImportSidebar() {
+  const browse = state.localFolderBrowse;
+  const roots = browse?.roots || [];
+  const selected = state.localImportFolder;
+  const selectedLabel = selected ? selected.split(/[\\/]/).filter(Boolean).at(-1) : "";
+  const form = selected ? `
+    <form class="series-form" id="localImportForm">
+      <div class="inline-alert field-span">
+        <strong>Importing ${escapeHtml(selectedLabel)}</strong>
+        <p>Existing CBZ files stay where they are. Renaming is optional and checked for collisions before anything changes.</p>
+      </div>
+      <label class="field-span">
+        <span>Library title</span>
+        <input name="title" type="text" required maxlength="120" value="${escapeHtml(selectedLabel)}" />
+      </label>
+      <label class="field-span">
+        <span>Source URL (optional)</span>
+        <input name="source_url" type="url" placeholder="Leave blank for a local-only series" />
+        <small class="field-hint">Add a supported source if you want Sakurarr to monitor this series later.</small>
+      </label>
+      <label class="field-span">
+        <span>Naming format for this series</span>
+        <input name="naming_format" type="text" value="${escapeHtml(state.settings.default_naming_format || "{ChapterFullTitle}")}" />
+      </label>
+      <label class="toggle-line field-span">
+        <input name="rename_files" type="checkbox" />
+        <span>Rename the existing CBZ files using this format</span>
+      </label>
+      <button class="primary-action field-span" type="submit" ${state.localImportBusy ? "disabled" : ""}>
+        ${icons.folder}<span>${state.localImportBusy ? "Importing…" : "Import local series"}</span>
+      </button>
+    </form>
+  ` : "";
+  return `
+    <div class="panel-heading">
+      <div><h2>Add existing local series</h2><p>Choose a folder under one of your configured library roots.</p></div>
+    </div>
+    <div class="sidebar-block local-folder-browser">
+      ${browse?.current_path ? `
+        <p class="local-folder-path">${escapeHtml(browse.current_path)}</p>
+        ${browse.parent_path ? `<button class="small-action compact-action" type="button" data-local-folder-path="${escapeHtml(browse.parent_path)}">${icons.folder}<span>Up one folder</span></button>` : ""}
+        <div class="local-folder-list">
+          ${(browse.folders || []).map((folder) => `<button type="button" data-local-folder-path="${escapeHtml(folder.path)}"><span>${icons.folder}${escapeHtml(folder.name)}</span><span>${Number(folder.cbz_count || 0)} CBZ</span></button>`).join("") || `<p class="sidebar-result-empty">No subfolders.</p>`}
+        </div>
+        <button class="small-action" type="button" data-local-folder-select="${escapeHtml(browse.current_path)}" ${browse.is_root || !browse.cbz_count ? "disabled" : ""}>Use this folder · ${Number(browse.cbz_count || 0)} CBZ</button>
+      ` : `
+        <strong>Library roots</strong>
+        <div class="local-folder-list">
+          ${roots.map((root) => `<button type="button" data-local-folder-path="${escapeHtml(root.path)}"><span>${icons.folder}${escapeHtml(root.name)}</span><span>Open</span></button>`).join("") || `<p class="sidebar-result-empty">No configured library folders are available.</p>`}
+        </div>
+      `}
+      ${state.localImportMessage ? `<div class="inline-alert"><strong>Import issue</strong><p>${escapeHtml(state.localImportMessage)}</p></div>` : ""}
+    </div>
+    ${selected ? `<div class="sidebar-block"><p class="local-folder-path">Selected folder: ${escapeHtml(selected)}</p><button class="small-action compact-action" type="button" data-local-folder-clear>Choose another folder</button></div>${form}` : ""}
+  `;
 }
 
 function renderDiscoverSidebar() {
@@ -1365,7 +1453,7 @@ function renderDetailsSidebar(selected) {
     </div>
     <div class="sidebar-detail-list">
       ${sidebarDetailRow("Library title", selected.title)}
-      ${sidebarDetailRow("Source URL", `<a href="${escapeHtml(selected.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(selected.source_url)}</a>`)}
+      ${sidebarDetailRow("Source URL", selected.source_url ? `<a href="${escapeHtml(selected.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(selected.source_url)}</a>` : "Local-only import; add a supported URL in Settings to monitor it")}
       ${sidebarDetailRow("Backup sources", backupSourceSummary)}
       ${sidebarDetailRow(
         "Metadata match",
@@ -1628,7 +1716,7 @@ function renderSearchResults(hasQuery, hasResults, results) {
                   (series) => `
                     <button class="sidebar-result-button" type="button" data-sidebar-select-series="${series.id}">
                       <strong>${escapeHtml(series.title)}</strong>
-                      <span>${escapeHtml(getHostLabel(series.source_url))}</span>
+                      <span>${escapeHtml(series.local_only ? "Local only" : getHostLabel(series.source_url))}</span>
                     </button>
                   `,
                 )
@@ -1680,8 +1768,9 @@ function renderSeriesForm({ mode, title, description, draft, submitLabel, submit
     <form class="series-form" id="seriesForm" data-mode="${escapeHtml(mode)}">
       <label class="field-span">
         <span>Source URL</span>
-        <input name="source_url" type="url" required value="${escapeHtml(safeDraft.source_url)}" placeholder="https://example.com/manga" />
+        <input name="source_url" type="url" ${safeDraft.local_only ? "" : "required"} value="${escapeHtml(safeDraft.source_url)}" placeholder="https://example.com/manga" />
       </label>
+      ${safeDraft.local_only ? '<input name="local_only" type="hidden" value="true" />' : ""}
       ${renderAtsumaruTranslatorPicker(safeDraft)}
       <label class="field-span">
         <span>Backup source URLs</span>
@@ -2901,6 +2990,7 @@ function readSeriesFormPayload(form) {
     naming_format: String(formData.get("naming_format") || "").trim(),
     enabled: formData.get("enabled") === "on",
     backfill_existing: formData.get("backfill_existing") === "on",
+    local_only: formData.get("local_only") === "true" && !String(formData.get("source_url") || "").trim(),
   };
 }
 
@@ -2943,6 +3033,7 @@ function syncDraftFromPayload(payload, mode) {
     naming_format: payload.naming_format || "",
     enabled: Boolean(payload.enabled),
     backfill_existing: Boolean(payload.backfill_existing),
+    local_only: Boolean(payload.local_only),
   });
   if (mode === "edit") {
     state.editDraft = draft;
@@ -3269,6 +3360,21 @@ $("#librarySearchClear").addEventListener("click", () => {
 });
 
 $("#openAddSeriesButton").addEventListener("click", () => {
+  const menu = $("#addSeriesMenu");
+  const willOpen = menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !willOpen);
+  $("#openAddSeriesButton").setAttribute("aria-expanded", String(willOpen));
+});
+
+$("#addSeriesMenu").addEventListener("click", async (event) => {
+  const action = event.target.closest("[data-add-series-action]")?.dataset.addSeriesAction;
+  if (!action) return;
+  $("#addSeriesMenu").classList.add("hidden");
+  $("#openAddSeriesButton").setAttribute("aria-expanded", "false");
+  if (action === "local") {
+    await openLocalImport();
+    return;
+  }
   setSidebarMode("discover");
   clearSearchPreview({ resetDraft: true });
   renderAll();
@@ -3277,6 +3383,12 @@ $("#openAddSeriesButton").addEventListener("click", () => {
     searchInput.focus();
     searchInput.select();
   }
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".add-series-menu-wrap")) return;
+  $("#addSeriesMenu")?.classList.add("hidden");
+  $("#openAddSeriesButton")?.setAttribute("aria-expanded", "false");
 });
 
 $("#optionsForm").addEventListener("click", (event) => {
@@ -3299,9 +3411,40 @@ document.addEventListener("click", (event) => {
 });
 
 listen($("#sidebarPanel"), "submit", async (event) => {
-  const form = event.target.closest("#seriesForm, #sidebarSearchForm");
+  const form = event.target.closest("#seriesForm, #sidebarSearchForm, #localImportForm");
   if (!form) return;
   event.preventDefault();
+
+  if (form.id === "localImportForm") {
+    state.localImportBusy = true;
+    state.localImportMessage = "";
+    renderSidebar();
+    try {
+      const formData = new FormData(form);
+      const response = await api("/api/library/import-series", {
+        method: "POST",
+        body: JSON.stringify({
+          folder_path: state.localImportFolder,
+          title: String(formData.get("title") || "").trim(),
+          source_url: String(formData.get("source_url") || "").trim(),
+          naming_format: String(formData.get("naming_format") || "").trim() || null,
+          rename_files: formData.get("rename_files") === "on",
+        }),
+      });
+      state.selectedSeriesId = Number(response.series?.id || 0) || null;
+      state.focusTab = "chapters";
+      state.sidebarMode = "chapters";
+      state.localFolderBrowse = null;
+      state.localImportFolder = "";
+      setNotice(`Imported ${response.imported_chapters} existing chapters for ${response.series.title}.`, "success");
+      await refreshAll({ quiet: true });
+    } catch (error) {
+      state.localImportBusy = false;
+      state.localImportMessage = error.message || "The local import failed.";
+      renderSidebar();
+    }
+    return;
+  }
 
   if (form.id === "sidebarSearchForm") {
     await runSidebarSearch(form.elements.query?.value || "");
@@ -3417,6 +3560,25 @@ listen($("#sidebarPanel"), "change", async (event) => {
 });
 
 listen($("#sidebarPanel"), "click", async (event) => {
+  const folderButton = event.target.closest("[data-local-folder-path]");
+  if (folderButton) {
+    state.localImportFolder = "";
+    await browseLocalFolders(folderButton.dataset.localFolderPath || "");
+    return;
+  }
+  const useFolderButton = event.target.closest("[data-local-folder-select]");
+  if (useFolderButton && !useFolderButton.disabled) {
+    state.localImportFolder = useFolderButton.dataset.localFolderSelect || "";
+    state.localImportMessage = "";
+    renderSidebar();
+    return;
+  }
+  if (event.target.closest("[data-local-folder-clear]")) {
+    state.localImportFolder = "";
+    renderSidebar();
+    return;
+  }
+
   const variableButton = event.target.closest("[data-insert-variable]");
   if (variableButton) {
     const target = resolveVariableTarget(variableButton);

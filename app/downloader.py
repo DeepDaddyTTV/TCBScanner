@@ -42,6 +42,9 @@ class MangaDownloader:
         series = self.store.get_series(series_id)
         if not series:
             return
+        if series.get("local_only") or not str(series.get("source_url") or "").strip():
+            self.store.add_event(series_id, None, "warning", "Scan skipped: this series has no source URL configured.")
+            return
         self.store.record_check_start(series_id)
         try:
             source_url, chapters, source_index = await self._discover_series_chapters(series)

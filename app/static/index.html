@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="/static/branding/sakurarr-mark.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260924o" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260925b" />
   </head>
   <body>
     <main class="app-shell">
@@ -46,9 +46,15 @@
                     <h2>Tracked series</h2>
                     <p>Select a title to inspect its queue.</p>
                   </div>
-                  <button class="icon-button" id="openAddSeriesButton" type="button" aria-label="Add a new series">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
-                  </button>
+                  <div class="add-series-menu-wrap">
+                    <button class="icon-button" id="openAddSeriesButton" type="button" aria-label="Add a series" aria-haspopup="menu" aria-expanded="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+                    </button>
+                    <div class="add-series-menu hidden" id="addSeriesMenu" role="menu">
+                      <button type="button" role="menuitem" data-add-series-action="new">Add new series</button>
+                      <button type="button" role="menuitem" data-add-series-action="local">Add existing local series</button>
+                    </div>
+                  </div>
                 </div>
                 <form class="rail-search" id="librarySearchForm">
                   <label class="rail-search-field" for="librarySearchInput">
@@ -321,6 +327,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260925a"></script>
+    <script src="/static/app.js?v=20260925b"></script>
   </body>
 </html>

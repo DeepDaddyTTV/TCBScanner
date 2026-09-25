@@ -460,6 +460,71 @@ svg {
   flex: 0 0 40px;
 }
 
+.add-series-menu-wrap {
+  position: relative;
+  flex: 0 0 40px;
+}
+
+.add-series-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 220px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+}
+
+.add-series-menu button {
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.add-series-menu button:hover,
+.add-series-menu button:focus-visible {
+  background: var(--surface-3);
+}
+
+.local-folder-browser {
+  display: grid;
+  gap: 10px;
+}
+
+.local-folder-path {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.local-folder-list {
+  display: grid;
+  gap: 6px;
+  max-height: 230px;
+  overflow: auto;
+}
+
+.local-folder-list button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  text-align: left;
+}
+
+.local-folder-list button span:last-child {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .rail-search {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 40px 40px;

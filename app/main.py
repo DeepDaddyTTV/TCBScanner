@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import os
 import re
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from .downloader import MangaDownloader
+from .downloader import MangaDownloader, render_naming_template
 from . import scraper
 from .store import DEFAULT_NAMING_FORMAT, Store
 
@@ -142,7 +143,7 @@ monitor_task: asyncio.Task[None] | None = None
 
 class SeriesCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
-    source_url: str = Field(min_length=1, max_length=500)
+    source_url: str = Field(default="", max_length=500)
     backup_source_urls: list[str] = Field(default_factory=list, max_length=8)
     folder: str = Field(default="", max_length=240)
     check_interval_hours: float = Field(default=0.5, ge=0.5, le=168)
@@ -157,11 +158,14 @@ class SeriesCreate(BaseModel):
     metadata_chapter_count: int | None = Field(default=None, ge=1)
     enabled: bool = True
     backfill_existing: bool = False
+    local_only: bool = False
 
     @field_validator("source_url")
     @classmethod
     def require_http_url(cls, value: str) -> str:
         cleaned = value.strip()
+        if not cleaned:
+            return ""
         if not cleaned.startswith(("http://", "https://")):
             raise ValueError("Enter a full http or https URL.")
         return cleaned
@@ -256,6 +260,27 @@ class PosterUpdate(BaseModel):
 class SeriesReset(BaseModel):
     delete_files: bool = False
     rescan: bool = True
+
+
+class LocalSeriesImport(BaseModel):
+    folder_path: str = Field(min_length=1, max_length=2000)
+    title: str = Field(min_length=1, max_length=120)
+    source_url: str = Field(default="", max_length=500)
+    naming_format: str | None = Field(default=None, max_length=180)
+    rename_files: bool = False
+
+    @field_validator("title")
+    @classmethod
+    def trim_local_title(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_optional_source(cls, value: str) -> str:
+        cleaned = value.strip()
+        if cleaned and (not cleaned.startswith(("http://", "https://")) or not scraper.host_is_supported(cleaned)):
+            raise ValueError("Enter a supported http or https manga source URL, or leave it blank for a local-only series.")
+        return cleaned
 
 
 @app.on_event("startup")
@@ -436,9 +461,196 @@ async def import_library(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _resolve_import_folder(raw_path: str) -> tuple[Path, Path]:
+    candidate = Path(raw_path).expanduser().resolve()
+    for configured_root in LIBRARY_ROOTS:
+        root = configured_root.expanduser().resolve()
+        if candidate == root or root in candidate.parents:
+            if not candidate.is_dir():
+                raise HTTPException(status_code=400, detail="Choose an existing folder inside a configured library root.")
+            return root, candidate
+    raise HTTPException(status_code=400, detail="Folder must stay inside one of the configured library roots.")
+
+
+@app.get("/api/library/folders")
+async def browse_library_folders(path: str | None = None) -> dict[str, Any]:
+    if not path:
+        roots = []
+        for configured_root in LIBRARY_ROOTS:
+            root = configured_root.expanduser().resolve()
+            if root.is_dir():
+                roots.append({"path": str(root), "name": root.name or str(root), "is_root": True})
+        return {"roots": roots, "current_path": "", "parent_path": "", "folders": [], "cbz_count": 0}
+
+    root, current = _resolve_import_folder(path)
+    folders: list[dict[str, Any]] = []
+    try:
+        children = sorted(current.iterdir(), key=lambda item: item.name.casefold())
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="Unable to read this folder.") from exc
+    for child in children:
+        if not child.is_dir():
+            continue
+        resolved = child.resolve()
+        if resolved != root and root not in resolved.parents:
+            continue
+        folders.append({
+            "path": str(resolved),
+            "name": child.name,
+            "cbz_count": sum(1 for item in resolved.iterdir() if item.is_file() and item.suffix.lower() == ".cbz"),
+        })
+    cbz_count = sum(1 for item in current.iterdir() if item.is_file() and item.suffix.lower() == ".cbz")
+    return {
+        "roots": [],
+        "current_path": str(current),
+        "parent_path": str(current.parent) if current != root else "",
+        "is_root": current == root,
+        "folders": folders,
+        "cbz_count": cbz_count,
+    }
+
+
+@app.post("/api/library/import-series")
+async def import_local_series(payload: LocalSeriesImport) -> dict[str, Any]:
+    root, folder = _resolve_import_folder(payload.folder_path)
+    if folder == root:
+        raise HTTPException(status_code=400, detail="Choose a series folder below the library root, not the root itself.")
+    for existing_series in store.list_series():
+        existing_folder = str(existing_series.get("folder") or "").strip()
+        try:
+            same_folder = existing_folder and Path(existing_folder).expanduser().resolve() == folder
+        except OSError:
+            same_folder = False
+        if same_folder:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This folder is already tracked as {existing_series['title']}. Open that series instead.",
+            )
+    files = sorted(
+        (item for item in folder.iterdir() if item.is_file() and item.suffix.lower() == ".cbz"),
+        key=lambda item: item.name.casefold(),
+    )
+    if not files:
+        raise HTTPException(status_code=400, detail="This folder has no CBZ files to import.")
+
+    chapters: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for file_path in files:
+        if file_path.is_symlink():
+            raise HTTPException(status_code=400, detail=f"Cannot import linked file {file_path.name}; place the CBZ inside the selected series folder first.")
+        try:
+            with zipfile.ZipFile(file_path) as archive:
+                bad_member = archive.testzip()
+                if bad_member:
+                    raise ValueError(f"{file_path.name} contains a damaged archive entry.")
+                page_count = sum(
+                    1 for name in archive.namelist()
+                    if Path(name).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"}
+                )
+                if not page_count:
+                    raise ValueError(f"{file_path.name} contains no readable image pages.")
+        except (OSError, zipfile.BadZipFile, RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"Cannot import {file_path.name}: {exc}") from exc
+        stem = file_path.stem
+        chapter_key, sort_key = scraper.parse_chapter_key(stem, stem)
+        if chapter_key in seen_keys:
+            raise HTTPException(status_code=400, detail=f"Multiple CBZ files resolve to chapter {chapter_key}; rename them to unique chapter numbers first.")
+        seen_keys.add(chapter_key)
+        chapters.append({
+            "url": f"local://{file_path.name}",
+            "chapter_key": chapter_key,
+            "sort_key": sort_key,
+            "title": stem,
+            "page_count": page_count,
+            "source_path": file_path,
+        })
+
+    naming_format = " ".join((payload.naming_format or store.get_default_naming_format()).strip().split())
+    rename_plan: list[tuple[Path, Path]] = []
+    if payload.rename_files:
+        proposed: set[Path] = set()
+        preview_series = {"title": payload.title}
+        for chapter in chapters:
+            target = folder / render_naming_template(
+                preview_series,
+                {"chapter_key": chapter["chapter_key"], "display_title": chapter["title"]},
+                naming_format,
+                chapter["page_count"],
+            )
+            source = chapter["source_path"]
+            if target != source and (target.exists() or target in proposed):
+                raise HTTPException(status_code=409, detail=f"Cannot rename safely: {target.name} already exists or is another chapter's target.")
+            proposed.add(target)
+            if target != source:
+                rename_plan.append((source, target))
+
+    renamed: list[tuple[Path, Path]] = []
+    series: dict[str, Any] | None = None
+    try:
+        for source, target in rename_plan:
+            source.rename(target)
+            renamed.append((source, target))
+            for chapter in chapters:
+                if chapter["source_path"] == source:
+                    chapter["source_path"] = target
+                    chapter["url"] = f"local://{target.name}"
+                    break
+
+        has_source = bool(payload.source_url)
+        series = store.create_series({
+            "title": payload.title,
+            "source_url": payload.source_url,
+            "folder": str(folder),
+            "check_interval_minutes": 1440,
+            "enabled": has_source,
+            "backfill_existing": False,
+            "naming_format": naming_format,
+            "local_only": not has_source,
+            "metadata_provider": store.get_setting("default_metadata_provider") or DEFAULT_METADATA_PROVIDER,
+            "preferred_translator": "auto",
+        })
+        created = store.upsert_chapters(int(series["id"]), chapters, "downloaded")
+        if len(created) != len(chapters):
+            raise RuntimeError("One or more chapters conflicted with an existing imported record.")
+        for chapter, record in zip(chapters, created):
+            store.set_chapter_status(
+                int(record["id"]),
+                "downloaded",
+                cbz_path=str(chapter["source_path"]),
+                page_count=int(chapter["page_count"]),
+            )
+        store.add_event(
+            int(series["id"]),
+            None,
+            "info",
+            f"Imported {len(chapters)} existing CBZ chapter(s) from {folder.name}.",
+        )
+    except Exception as exc:
+        if series:
+            store.delete_series(int(series["id"]))
+        restore_failures: list[str] = []
+        for source, target in reversed(renamed):
+            try:
+                target.rename(source)
+            except OSError:
+                restore_failures.append(source.name)
+        if isinstance(exc, HTTPException):
+            raise
+        message = "The local import failed; no series entry was kept."
+        if restore_failures:
+            message += f" Could not restore renamed file(s): {', '.join(restore_failures)}. Check the selected folder."
+        raise HTTPException(status_code=500, detail=message) from exc
+
+    if payload.source_url and series:
+        schedule_check(int(series["id"]))
+    return {"ok": True, "series": store.get_series(int(series["id"])), "imported_chapters": len(chapters)}
+
+
 @app.post("/api/series")
 async def create_series(payload: SeriesCreate) -> dict[str, Any]:
     data = payload.model_dump()
+    if not data["source_url"]:
+        raise HTTPException(status_code=400, detail="A source URL is required when tracking a new series. Use local import for existing CBZ files.")
     data["backup_source_urls"] = without_primary_source(
         data["source_url"],
         data.get("backup_source_urls", []),
@@ -465,9 +677,16 @@ async def create_series(payload: SeriesCreate) -> dict[str, Any]:
 
 @app.put("/api/series/{series_id}")
 async def update_series(series_id: int, payload: SeriesUpdate) -> dict[str, Any]:
-    if not store.get_series(series_id):
+    existing = store.get_series(series_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Series not found.")
     data = payload.model_dump()
+    if data["source_url"]:
+        data["local_only"] = False
+    elif not data.get("local_only"):
+        raise HTTPException(status_code=400, detail="A source URL is required unless this is a local-only import.")
+    if data.get("local_only") and data.get("enabled"):
+        data["enabled"] = False
     data["backup_source_urls"] = without_primary_source(
         data["source_url"],
         data.get("backup_source_urls", []),
@@ -489,8 +708,11 @@ async def delete_series(series_id: int) -> dict[str, bool]:
 
 @app.post("/api/series/{series_id}/enabled")
 async def set_enabled(series_id: int, payload: EnabledUpdate) -> dict[str, Any]:
-    if not store.get_series(series_id):
+    existing = store.get_series(series_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Series not found.")
+    if payload.enabled and existing.get("local_only"):
+        raise HTTPException(status_code=400, detail="Add a supported source URL in Series Settings before enabling monitoring.")
     series = store.set_series_enabled(series_id, payload.enabled)
     return {"series": series}
 
@@ -568,7 +790,7 @@ async def reset_series(series_id: int, payload: SeriesReset) -> dict[str, Any]:
     finally:
         if cancellation_requested:
             downloader.clear_cancel(series_id)
-    if payload.rescan:
+    if payload.rescan and not series.get("local_only"):
         schedule_check(series_id)
     return {
         "ok": True,
@@ -588,16 +810,22 @@ async def list_chapters(series_id: int) -> dict[str, Any]:
 
 @app.post("/api/series/{series_id}/check")
 async def check_series(series_id: int) -> dict[str, bool]:
-    if not store.get_series(series_id):
+    series = store.get_series(series_id)
+    if not series:
         raise HTTPException(status_code=404, detail="Series not found.")
+    if series.get("local_only"):
+        raise HTTPException(status_code=400, detail="Add a supported source URL in Series Settings before scanning this local-only series.")
     schedule_check(series_id)
     return {"ok": True}
 
 
 @app.post("/api/series/{series_id}/download-missing")
 async def download_missing(series_id: int) -> dict[str, Any]:
-    if not store.get_series(series_id):
+    series = store.get_series(series_id)
+    if not series:
         raise HTTPException(status_code=404, detail="Series not found.")
+    if series.get("local_only"):
+        raise HTTPException(status_code=400, detail="Add a supported source URL in Series Settings before scanning for missing chapters.")
     changed = store.mark_missing_pending(series_id)
     store.add_event(series_id, None, "info", f"Queued {changed} skipped or failed chapter(s).")
     schedule_download(series_id)

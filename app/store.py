@@ -15,7 +15,7 @@ def utc_now() -> str:
 
 DEFAULT_NAMING_FORMAT = "{ChapterFullTitle}"
 LEGACY_DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
-SNAPSHOT_SCHEMA_VERSION = 5
+SNAPSHOT_SCHEMA_VERSION = 6
 
 
 def normalize_backup_source_urls(value: Any) -> list[str]:
@@ -128,6 +128,7 @@ class Store:
             self._ensure_column("series", "metadata_url", "TEXT")
             self._ensure_column("series", "metadata_chapter_count", "INTEGER")
             self._ensure_column("series", "preferred_translator", "TEXT NOT NULL DEFAULT 'auto'")
+            self._ensure_column("series", "local_only", "INTEGER NOT NULL DEFAULT 0")
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO settings (key, value)
@@ -165,9 +166,9 @@ class Store:
                     enabled, backfill_existing, initialized, created_at, naming_format,
                     poster_image_url, backup_source_urls, metadata_provider,
                     metadata_provider_override, metadata_id, metadata_title,
-                    metadata_url, metadata_chapter_count, preferred_translator
+                    metadata_url, metadata_chapter_count, preferred_translator, local_only
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["title"],
@@ -187,6 +188,7 @@ class Store:
                     payload.get("metadata_url") or None,
                     payload.get("metadata_chapter_count"),
                     payload.get("preferred_translator") or "auto",
+                    1 if payload.get("local_only", False) else 0,
                 ),
             )
             series_id = int(cur.lastrowid)
@@ -213,7 +215,8 @@ class Store:
                     metadata_title = ?,
                     metadata_url = ?,
                     metadata_chapter_count = ?,
-                    preferred_translator = ?
+                    preferred_translator = ?,
+                    local_only = ?
                 WHERE id = ?
                 """,
                 (
@@ -233,6 +236,7 @@ class Store:
                     payload.get("metadata_url") or None,
                     payload.get("metadata_chapter_count"),
                     payload.get("preferred_translator") or "auto",
+                    1 if payload.get("local_only", False) else 0,
                     series_id,
                 ),
             )
@@ -766,9 +770,9 @@ class Store:
                         last_checked_at, last_error, naming_format, poster_image_url,
                         backup_source_urls, metadata_provider, metadata_provider_override,
                         metadata_id, metadata_title, metadata_url, metadata_chapter_count,
-                        preferred_translator
+                        preferred_translator, local_only
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -793,6 +797,7 @@ class Store:
                             row.get("metadata_url"),
                             row.get("metadata_chapter_count"),
                             row.get("preferred_translator") or "auto",
+                            1 if row.get("local_only", False) else 0,
                         )
                         for row in snapshot["series"]
                     ],
@@ -953,11 +958,15 @@ class Store:
             if series_id in seen_ids:
                 raise ValueError(f"Duplicate series id found: {series_id}")
             seen_ids.add(series_id)
+            source_url = str(row.get("source_url") or "").strip()
+            local_only = self._coerce_bool(row.get("local_only", False), "Series local_only")
+            if not source_url and not local_only:
+                raise ValueError("A series without a source URL must be marked local_only.")
             normalized.append(
                 {
                     "id": series_id,
                     "title": self._require_text(row.get("title"), "Series title"),
-                    "source_url": self._require_text(row.get("source_url"), "Series source URL"),
+                    "source_url": source_url,
                     "folder": self._require_text(row.get("folder"), "Series folder"),
                     "check_interval_minutes": max(
                         1,
@@ -997,6 +1006,7 @@ class Store:
                     "preferred_translator": self._optional_compact_text(
                         row.get("preferred_translator") or "auto"
                     ) or "auto",
+                    "local_only": local_only,
                 }
             )
         return normalized
@@ -1158,6 +1168,7 @@ class Store:
             "enabled",
             "backfill_existing",
             "initialized",
+            "local_only",
         ):
             if key in data:
                 data[key] = bool(data[key])
