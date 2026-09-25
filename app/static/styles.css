@@ -2585,11 +2585,10 @@ input[type="checkbox"] {
   }
 
   .chapter-list-wrap {
-    max-height: 70vh;
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
+    max-height: none;
+    overflow: visible;
+    overscroll-behavior: auto;
+    -webkit-overflow-scrolling: auto;
   }
 
   .chapter-list-head {
