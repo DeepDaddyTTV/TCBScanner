@@ -132,6 +132,7 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const themeKey = "sakurarr-theme-v1";
+const libraryRailKey = "sakurarr-library-rail-collapsed-v1";
 const legacyThemeKey = "tcbscanner-theme-v4";
 const themeMediaQuery =
   typeof window.matchMedia === "function"
@@ -976,6 +977,8 @@ function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
       class="series-card${isSelected ? " selected" : ""}${densityClass}"
       data-series-id="${series.id}"
       data-series-slug="${escapeHtml(normalizeSeriesKey(series.title).replaceAll(" ", "-"))}"
+      aria-label="Open ${escapeHtml(series.title)}"
+      title="${escapeHtml(series.title)}"
       ${searchMode ? 'data-search-context="query"' : ""}
       tabindex="0"
       role="button"
@@ -2627,6 +2630,43 @@ function initTheme() {
   setTheme(normalized);
 }
 
+function setLibraryRailCollapsed(collapsed, persist = true) {
+  const isDesktop = window.matchMedia("(min-width: 821px)").matches;
+  const shouldCollapse = isDesktop && Boolean(collapsed);
+  const frame = $(".app-frame");
+  const toggle = $("#libraryCollapseToggle");
+  frame?.classList.toggle("library-collapsed", shouldCollapse);
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", String(!shouldCollapse));
+    toggle.setAttribute("aria-label", shouldCollapse ? "Expand tracked series bar" : "Collapse tracked series bar");
+    toggle.title = shouldCollapse ? "Expand tracked series bar" : "Collapse tracked series bar";
+  }
+  if (persist) {
+    localStorage.setItem(libraryRailKey, shouldCollapse ? "true" : "false");
+  }
+}
+
+function initLibraryRail() {
+  const savedPreference = localStorage.getItem(libraryRailKey);
+  const defaultsToCollapsed = window.matchMedia("(min-width: 821px) and (max-width: 1180px)").matches;
+  setLibraryRailCollapsed(savedPreference === null ? defaultsToCollapsed : savedPreference === "true", false);
+
+  $("#libraryCollapseToggle")?.addEventListener("click", () => {
+    const collapsed = $(".app-frame")?.classList.contains("library-collapsed");
+    setLibraryRailCollapsed(!collapsed);
+  });
+
+  window.addEventListener("resize", () => {
+    const savedPreference = localStorage.getItem(libraryRailKey);
+    if (savedPreference === null) {
+      const shouldCollapse = window.matchMedia("(min-width: 821px) and (max-width: 1180px)").matches;
+      setLibraryRailCollapsed(shouldCollapse, false);
+    } else {
+      setLibraryRailCollapsed(savedPreference === "true", false);
+    }
+  });
+}
+
 function toggleOptionsPanel(forceOpen) {
   const panel = $("#settingsDrawer");
   if (!panel) return;
@@ -3828,6 +3868,7 @@ if (themeMediaQuery) {
 }
 
 initTheme();
+initLibraryRail();
 renderAll();
 void refreshAll();
 setInterval(() => {

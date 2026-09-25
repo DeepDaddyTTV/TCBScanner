@@ -18,22 +18,27 @@
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="/static/branding/sakurarr-mark.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260925b" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260925c" />
   </head>
   <body>
     <main class="app-shell">
       <div class="app-frame">
         <aside class="library-rail" id="librarySection" aria-label="Tracked library">
           <section class="brand-panel" id="brandPanel">
-            <div class="brand-block">
-              <div class="brand-logo" aria-label="Sakurarr">
-                <img src="/static/branding/sakurarr-mark.svg" alt="" />
-                <strong>Sakur<span>arr</span></strong>
+            <div class="brand-header">
+              <div class="brand-block">
+                <div class="brand-logo" aria-label="Sakurarr">
+                  <img src="/static/branding/sakurarr-mark.svg" alt="" />
+                  <strong>Sakur<span>arr</span></strong>
+                </div>
+                <div class="brand-copy">
+                  <p>Manga in bloom.</p>
+                  <span>Manga &amp; manhwa chapter monitor</span>
+                </div>
               </div>
-              <div class="brand-copy">
-                <p>Manga in bloom.</p>
-                <span>Manga &amp; manhwa chapter monitor</span>
-              </div>
+              <button class="icon-button library-collapse-button" id="libraryCollapseToggle" type="button" aria-label="Collapse tracked series bar" aria-expanded="true" title="Collapse tracked series bar">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.7 5.3-1.4 1.4L17.6 11H4v2h13.6l-4.3 4.3 1.4 1.4L21.4 12l-6.7-6.7Z"/></svg>
+              </button>
             </div>
             <div class="brand-illustration" id="brandIllustration" aria-hidden="true"></div>
           </section>
@@ -327,6 +332,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260925b"></script>
+    <script src="/static/app.js?v=20260925c"></script>
   </body>
 </html>

@@ -248,13 +248,37 @@ svg {
   background: var(--surface);
 }
 
+.brand-header {
+  position: relative;
+}
+
 .brand-block {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
   grid-template-rows: auto auto auto;
   column-gap: 13px;
   row-gap: 0;
-  padding: 16px 20px;
+  padding: 16px 58px 16px 20px;
+}
+
+.library-collapse-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  color: var(--muted);
+}
+
+.library-collapse-button svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(180deg);
+  transition: transform 160ms ease;
+}
+
+.library-collapsed .library-collapse-button svg {
+  transform: none;
 }
 
 .brand-logo {
@@ -2048,6 +2072,82 @@ input[type="checkbox"] {
   display: none;
 }
 
+@media (min-width: 821px) {
+  .app-frame {
+    transition: grid-template-columns 180ms ease;
+  }
+
+  .app-frame.library-collapsed {
+    grid-template-columns: 76px minmax(0, 1fr) clamp(280px, 21vw, 320px);
+  }
+
+  .library-collapsed .brand-header {
+    display: grid;
+    justify-items: center;
+    gap: 7px;
+    padding: 12px 0 9px;
+  }
+
+  .library-collapsed .brand-block {
+    display: block;
+    padding: 0;
+  }
+
+  .library-collapsed .brand-logo img {
+    display: block;
+    width: 42px;
+    height: 42px;
+    margin: 0 auto;
+  }
+
+  .library-collapsed .brand-logo strong,
+  .library-collapsed .brand-copy,
+  .library-collapsed .brand-illustration,
+  .library-collapsed .series-panel-chrome,
+  .library-collapsed .overview-panel,
+  .library-collapsed .series-body,
+  .library-collapsed .empty-state,
+  .library-collapsed .series-list-group-label,
+  .library-collapsed .series-search-state {
+    display: none;
+  }
+
+  .library-collapsed .library-collapse-button {
+    position: static;
+    width: 34px;
+    height: 34px;
+  }
+
+  .library-collapsed .series-list {
+    align-content: start;
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .library-collapsed .series-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    width: 100%;
+    padding: 6px 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .library-collapsed .series-card.selected {
+    box-shadow: inset 3px 0 var(--sakura);
+  }
+
+  .library-collapsed .series-cover {
+    width: 48px;
+    height: 64px;
+  }
+
+  .library-collapsed .series-mark {
+    font-size: 14px;
+  }
+}
+
 @media (min-width: 821px) and (max-width: 1440px) {
   .command-bar {
     grid-template-columns: minmax(0, 1fr);
@@ -2077,6 +2177,10 @@ input[type="checkbox"] {
       "library main"
       "library tools"
       "status status";
+  }
+
+  .app-frame.library-collapsed {
+    grid-template-columns: 76px minmax(0, 1fr);
   }
 
   .library-rail {
@@ -2135,6 +2239,14 @@ input[type="checkbox"] {
     max-height: none;
     overflow: visible;
     border-right: 0;
+  }
+
+  .library-collapse-button {
+    display: none;
+  }
+
+  .brand-header {
+    display: block;
   }
 
   .library-rail .rail-scroll {
