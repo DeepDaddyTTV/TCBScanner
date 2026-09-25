@@ -2669,7 +2669,7 @@ function initTheme() {
 }
 
 function setLibraryRailCollapsed(collapsed, persist = true) {
-  const isDesktop = window.matchMedia("(min-width: 821px)").matches;
+  const isDesktop = window.matchMedia("(min-width: 1020px)").matches;
   const shouldCollapse = isDesktop && Boolean(collapsed);
   const frame = $(".app-frame");
   const toggle = $("#libraryCollapseToggle");
@@ -2686,7 +2686,7 @@ function setLibraryRailCollapsed(collapsed, persist = true) {
 
 function initLibraryRail() {
   const savedPreference = localStorage.getItem(libraryRailKey);
-  const defaultsToCollapsed = window.matchMedia("(min-width: 821px) and (max-width: 1180px)").matches;
+  const defaultsToCollapsed = window.matchMedia("(min-width: 1020px) and (max-width: 1180px)").matches;
   setLibraryRailCollapsed(savedPreference === null ? defaultsToCollapsed : savedPreference === "true", false);
 
   $("#libraryCollapseToggle")?.addEventListener("click", () => {
@@ -2697,7 +2697,7 @@ function initLibraryRail() {
   window.addEventListener("resize", () => {
     const savedPreference = localStorage.getItem(libraryRailKey);
     if (savedPreference === null) {
-      const shouldCollapse = window.matchMedia("(min-width: 821px) and (max-width: 1180px)").matches;
+      const shouldCollapse = window.matchMedia("(min-width: 1020px) and (max-width: 1180px)").matches;
       setLibraryRailCollapsed(shouldCollapse, false);
     } else {
       setLibraryRailCollapsed(savedPreference === "true", false);
