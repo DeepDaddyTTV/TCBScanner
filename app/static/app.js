@@ -133,6 +133,10 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const themeKey = "sakurarr-theme-v1";
 const libraryRailKey = "sakurarr-library-rail-collapsed-v1";
+const libraryStatsKey = "sakurarr-library-stats-collapsed-v1";
+const chapterPageSizeSessionKey = "sakurarr-chapter-page-sizes-v1";
+const chapterPageSizeValues = new Set(["20", "40", "60", "80", "100", "all"]);
+const chapterPageSizeFallback = new Map();
 const legacyThemeKey = "tcbscanner-theme-v4";
 const themeMediaQuery =
   typeof window.matchMedia === "function"
@@ -2071,11 +2075,20 @@ function renderChapters() {
   const preview = getPreviewSeries();
   const list = $("#chapterList");
   const head = $("#chapterListHead");
-  const visibleChapters = getVisibleChapters();
+  const filteredChapters = getFilteredChapters();
+  const visibleChapters = getVisibleChapters(filteredChapters, selected?.id);
+  const pageSizeControl = $("#chapterPageSizeControl");
+  if (selected && !preview && state.chapters.length) {
+    pageSizeControl?.classList.remove("hidden");
+    const pageSize = $("#chapterPageSize");
+    if (pageSize) pageSize.value = getChapterPageSize(selected.id);
+  } else {
+    pageSizeControl?.classList.add("hidden");
+  }
 
   $("#chapterCount").textContent = preview
     ? "Track this preview to build its queue."
-    : buildChapterCountLabel(selected, visibleChapters.length);
+    : buildChapterCountLabel(selected, visibleChapters.length, filteredChapters.length);
 
   if (preview) {
     head.classList.add("hidden");
@@ -2536,7 +2549,7 @@ function buildSeriesNote(series) {
   return "This title looks clean right now. Run a manual check or wait for the next global daily scan.";
 }
 
-function buildChapterCountLabel(selected, visibleCount) {
+function buildChapterCountLabel(selected, visibleCount, filteredCount) {
   if (!selected) {
     return "Select a series to see the queue.";
   }
@@ -2544,16 +2557,41 @@ function buildChapterCountLabel(selected, visibleCount) {
     return "No chapters indexed yet.";
   }
 
-  const total = state.chapters.length;
-  if (state.chapterFilter === "all") {
-    return `${total} chapter${total === 1 ? "" : "s"} in the queue.`;
-  }
-  return `${visibleCount} visible of ${total} indexed chapters.`;
+  const totalLabel = state.chapterFilter === "all" ? "chapters" : "matching chapters";
+  return `Showing ${visibleCount} of ${filteredCount} ${totalLabel}.`;
 }
 
-function getVisibleChapters() {
+function getFilteredChapters() {
   const activeFilter = CHAPTER_FILTERS.find((item) => item.id === state.chapterFilter) || CHAPTER_FILTERS[0];
   return state.chapters.filter(activeFilter.matches);
+}
+
+function getChapterPageSize(seriesId) {
+  if (!seriesId) return "20";
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(chapterPageSizeSessionKey) || "{}");
+    const value = String(saved[seriesId] || chapterPageSizeFallback.get(String(seriesId)) || "20");
+    return chapterPageSizeValues.has(value) ? value : "20";
+  } catch {
+    return chapterPageSizeFallback.get(String(seriesId)) || "20";
+  }
+}
+
+function setChapterPageSize(seriesId, value) {
+  if (!seriesId || !chapterPageSizeValues.has(String(value))) return;
+  chapterPageSizeFallback.set(String(seriesId), String(value));
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(chapterPageSizeSessionKey) || "{}");
+    saved[seriesId] = String(value);
+    sessionStorage.setItem(chapterPageSizeSessionKey, JSON.stringify(saved));
+  } catch {
+    // Keep the in-page control usable when browser storage is unavailable.
+  }
+}
+
+function getVisibleChapters(filteredChapters = getFilteredChapters(), seriesId = state.selectedSeriesId) {
+  const pageSize = getChapterPageSize(seriesId);
+  return pageSize === "all" ? filteredChapters : filteredChapters.slice(0, Number(pageSize));
 }
 
 function normalizeThemeChoice(theme) {
@@ -2664,6 +2702,27 @@ function initLibraryRail() {
     } else {
       setLibraryRailCollapsed(savedPreference === "true", false);
     }
+  });
+}
+
+function setLibraryStatsCollapsed(collapsed, persist = true) {
+  const section = $("#librarySection");
+  const toggle = $("#libraryStatsToggle");
+  const isCollapsed = Boolean(collapsed);
+  section?.classList.toggle("library-stats-collapsed", isCollapsed);
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", String(!isCollapsed));
+    toggle.setAttribute("aria-label", isCollapsed ? "Expand library stats" : "Collapse library stats");
+    toggle.title = isCollapsed ? "Expand library stats" : "Collapse library stats";
+  }
+  if (persist) localStorage.setItem(libraryStatsKey, isCollapsed ? "true" : "false");
+}
+
+function initLibraryStats() {
+  setLibraryStatsCollapsed(localStorage.getItem(libraryStatsKey) === "true", false);
+  $("#libraryStatsToggle")?.addEventListener("click", () => {
+    const collapsed = $("#librarySection")?.classList.contains("library-stats-collapsed");
+    setLibraryStatsCollapsed(!collapsed);
   });
 }
 
@@ -3335,6 +3394,13 @@ listen($("#chapterFilters"), "click", async (event) => {
   renderFilters();
 });
 
+$("#chapterPageSize")?.addEventListener("change", (event) => {
+  const selected = getSelectedSeries();
+  if (!selected) return;
+  setChapterPageSize(selected.id, event.target.value);
+  renderChapters();
+});
+
 listen($("#chapterList"), "click", async (event) => {
   const button = event.target.closest("button[data-action='retry']");
   if (!button) return;
@@ -3869,6 +3935,7 @@ if (themeMediaQuery) {
 
 initTheme();
 initLibraryRail();
+initLibraryStats();
 renderAll();
 void refreshAll();
 setInterval(() => {

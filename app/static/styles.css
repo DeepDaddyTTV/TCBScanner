@@ -480,6 +480,23 @@ svg {
   background: var(--surface);
 }
 
+.series-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.library-stats-toggle svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 160ms ease;
+}
+
+.library-stats-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
 .series-panel .panel-heading .icon-button {
   flex: 0 0 40px;
 }
@@ -852,7 +869,13 @@ textarea:focus,
 }
 
 .overview-panel {
-  padding: 16px 15px;
+  padding: 12px 15px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+#librarySection.library-stats-collapsed #libraryOverview {
+  display: none;
 }
 
 .overview-stats {
@@ -1336,6 +1359,30 @@ input[type="checkbox"] {
 .chapter-summary {
   color: var(--muted);
   font-size: 11px;
+}
+
+.chapter-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chapter-page-size-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chapter-page-size-control select {
+  width: auto;
+  min-width: 76px;
+  min-height: 32px;
+  padding: 0 8px;
 }
 
 .chapter-tools {
@@ -2159,44 +2206,28 @@ input[type="checkbox"] {
   }
 }
 
-@media (max-width: 1180px) {
-  body,
-  .app-shell {
-    height: auto;
-    min-height: 100vh;
-    overflow: auto;
-  }
-
+@media (min-width: 821px) and (max-width: 1180px) {
   .app-frame {
-    height: auto;
-    min-height: 100vh;
-    grid-template-columns: 300px minmax(0, 1fr);
-    grid-template-rows: auto auto auto 42px;
+    grid-template-columns: 300px minmax(0, 1fr) 280px;
+    grid-template-rows: auto minmax(0, 1fr) 42px;
     grid-template-areas:
-      "library command"
-      "library main"
-      "library tools"
-      "status status";
+      "library command tools"
+      "library main tools"
+      "status status status";
   }
 
   .app-frame.library-collapsed {
-    grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-columns: 76px minmax(0, 1fr) 280px;
   }
 
   .library-rail {
-    max-height: calc(100vh - 42px);
-    position: sticky;
-    top: 0;
+    max-height: none;
   }
 
   .utility-rail {
-    overflow: visible;
-    border-top: 1px solid var(--line);
-    border-left: 0;
-  }
-
-  .utility-rail .rail-scroll {
-    overflow: visible;
+    overflow: hidden;
+    border-top: 0;
+    border-left: 1px solid var(--line);
   }
 
   .command-bar {
@@ -2206,6 +2237,23 @@ input[type="checkbox"] {
 
   .command-meta {
     justify-content: space-between;
+  }
+
+  .topbar-actions > .toolbar-text-button,
+  .topbar-actions .theme-selector-trigger {
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 0;
+    gap: 0;
+  }
+
+  .refresh-button > span:last-child,
+  #optionsToggle > span:last-child,
+  .theme-selector-label,
+  .theme-selector-value,
+  .theme-select-caret {
+    display: none;
   }
 }
 
@@ -2331,10 +2379,6 @@ input[type="checkbox"] {
   }
 
   .series-error-disclosure {
-    display: none;
-  }
-
-  .overview-panel {
     display: none;
   }
 
@@ -2504,6 +2548,14 @@ input[type="checkbox"] {
 
   .chapter-summary {
     order: 1;
+  }
+
+  .chapter-summary-row {
+    align-items: flex-start;
+  }
+
+  .chapter-page-size-control select {
+    min-height: 30px;
   }
 
   .chapter-tools {

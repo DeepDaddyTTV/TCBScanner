@@ -18,7 +18,7 @@
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="/static/branding/sakurarr-mark.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260925c" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260925f" />
   </head>
   <body>
     <main class="app-shell">
@@ -51,13 +51,18 @@
                     <h2>Tracked series</h2>
                     <p>Select a title to inspect its queue.</p>
                   </div>
-                  <div class="add-series-menu-wrap">
-                    <button class="icon-button" id="openAddSeriesButton" type="button" aria-label="Add a series" aria-haspopup="menu" aria-expanded="false">
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+                  <div class="series-heading-actions">
+                    <button class="icon-button library-stats-toggle" id="libraryStatsToggle" type="button" aria-label="Collapse library stats" aria-expanded="true" aria-controls="libraryOverview" title="Collapse library stats">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"/></svg>
                     </button>
-                    <div class="add-series-menu hidden" id="addSeriesMenu" role="menu">
-                      <button type="button" role="menuitem" data-add-series-action="new">Add new series</button>
-                      <button type="button" role="menuitem" data-add-series-action="local">Add existing local series</button>
+                    <div class="add-series-menu-wrap">
+                      <button class="icon-button" id="openAddSeriesButton" type="button" aria-label="Add a series" aria-haspopup="menu" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+                      </button>
+                      <div class="add-series-menu hidden" id="addSeriesMenu" role="menu">
+                        <button type="button" role="menuitem" data-add-series-action="new">Add new series</button>
+                        <button type="button" role="menuitem" data-add-series-action="local">Add existing local series</button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -81,19 +86,18 @@
                 </form>
                 <p class="rail-search-meta" id="librarySearchMeta">Search your tracked library first, then supported sources.</p>
               </div>
-              <div class="series-list" id="seriesList"></div>
-            </section>
-
-            <section class="panel overview-panel" aria-label="Library overview">
-              <div class="panel-heading">
-                <div>
-                  <h2>Library overview</h2>
-                  <p>How the archive is behaving right now.</p>
+              <section class="overview-panel" id="libraryOverview" aria-label="Library overview">
+                <div class="panel-heading">
+                  <div>
+                    <h2>Library overview</h2>
+                    <p>How the archive is behaving right now.</p>
+                  </div>
+                  <span class="panel-badge" id="seriesCount">0 tracked</span>
                 </div>
-                <span class="panel-badge" id="seriesCount">0 tracked</span>
-              </div>
-              <div class="overview-stats" id="overviewStats"></div>
-              <div class="overview-breakdown" id="libraryBreakdown"></div>
+                <div class="overview-stats" id="overviewStats"></div>
+                <div class="overview-breakdown" id="libraryBreakdown"></div>
+              </section>
+              <div class="series-list" id="seriesList"></div>
             </section>
           </div>
         </aside>
@@ -116,12 +120,12 @@
                 <span class="ui-icon ui-icon-refresh" aria-hidden="true"></span>
                 <span>Refresh now</span>
               </button>
-              <button class="toolbar-text-button" id="optionsToggle" title="Global options" aria-label="Global options" aria-expanded="false" aria-controls="settingsDrawer">
+              <button class="toolbar-text-button" id="optionsToggle" title="Settings" aria-label="Settings" aria-expanded="false" aria-controls="settingsDrawer">
                 <span class="ui-icon ui-icon-settings" aria-hidden="true"></span>
                 <span>Settings</span>
               </button>
               <div class="theme-selector">
-                <button class="toolbar-text-button theme-selector-trigger" id="themeMenuButton" type="button" aria-label="Theme" aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu">
+                <button class="toolbar-text-button theme-selector-trigger" id="themeMenuButton" type="button" aria-label="Theme" title="Theme" aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu">
                   <span class="ui-icon theme-mode-icon" id="themeModeIcon" aria-hidden="true"></span>
                   <span class="theme-selector-label">Theme</span>
                   <span class="theme-selector-value" id="themeSelectorValue">Light</span>
@@ -176,7 +180,20 @@
                   </div>
                 </div>
               </div>
-              <p class="chapter-summary" id="chapterCount">Select a series to see the queue.</p>
+              <div class="chapter-summary-row">
+                <p class="chapter-summary" id="chapterCount">Select a series to see the queue.</p>
+                <label class="chapter-page-size-control hidden" id="chapterPageSizeControl" for="chapterPageSize">
+                  <span>Show</span>
+                  <select id="chapterPageSize" aria-label="Chapters shown for this series">
+                    <option value="20">20</option>
+                    <option value="40">40</option>
+                    <option value="60">60</option>
+                    <option value="80">80</option>
+                    <option value="100">100</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+              </div>
             </div>
 
             <div class="chapter-list-wrap">
@@ -332,6 +349,6 @@
         <a href="#chaptersSection">Settings</a>
       </nav>
     </main>
-    <script src="/static/app.js?v=20260925c"></script>
+    <script src="/static/app.js?v=20260925f"></script>
   </body>
 </html>
