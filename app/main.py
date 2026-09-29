@@ -297,6 +297,19 @@ class ReadingListEntry(BaseModel):
     progress: int | None = Field(default=None, ge=0)
     score: float | None = Field(default=None, ge=0)
     external_id: str = Field(default="", max_length=100)
+    source_url: str = Field(default="", max_length=500)
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_reading_list_source(cls, value: str) -> str:
+        cleaned = value.strip()
+        if cleaned and (not cleaned.startswith(("http://", "https://")) or not scraper.host_is_supported(cleaned)):
+            raise ValueError("Choose a supported series source URL or leave it blank to keep the series paused.")
+        return cleaned
+
+
+class ReadingListMatchRequest(BaseModel):
+    titles: list[str] = Field(min_length=1, max_length=MAX_IMPORT_ENTRIES)
 
 
 class ReadingListImport(BaseModel):
@@ -741,6 +754,20 @@ async def preview_anilist_reading_list(username: str) -> dict[str, Any]:
     return _reading_list_preview("anilist", entries)
 
 
+@app.post("/api/library/reading-list/matches")
+async def match_reading_list_sources(payload: ReadingListMatchRequest) -> dict[str, Any]:
+    titles = list(dict.fromkeys(" ".join(title.strip().split()) for title in payload.titles if title.strip()))
+    semaphore = asyncio.Semaphore(5)
+
+    async def match_title(title: str) -> dict[str, Any]:
+        async with semaphore:
+            matches = await scraper.search_primary_supported_series(title, limit=5)
+        return {"title": title, "matches": matches}
+
+    matches = await asyncio.gather(*(match_title(title) for title in titles))
+    return {"matches": matches, "searched_sites": ["weebcentral.com", "mangack.com"]}
+
+
 @app.post("/api/library/reading-list/import")
 async def import_reading_list(payload: ReadingListImport) -> dict[str, Any]:
     provider = payload.provider.strip().lower()
@@ -752,6 +779,7 @@ async def import_reading_list(payload: ReadingListImport) -> dict[str, Any]:
     }
     imported: list[dict[str, Any]] = []
     skipped: list[str] = []
+    monitored_count = 0
     for entry in payload.entries:
         key = normalize_title_key(entry.title)
         if not key or key in existing:
@@ -759,15 +787,15 @@ async def import_reading_list(payload: ReadingListImport) -> dict[str, Any]:
             continue
         series = store.create_series({
             "title": entry.title,
-            "source_url": "",
+            "source_url": entry.source_url,
             "folder": entry.title,
             "check_interval_minutes": 1440,
-            "enabled": False,
+            "enabled": bool(entry.source_url),
             "backfill_existing": False,
             "naming_format": store.get_default_naming_format(),
             "metadata_provider": store.get_setting("default_metadata_provider") or DEFAULT_METADATA_PROVIDER,
             "preferred_translator": "auto",
-            "local_only": True,
+            "local_only": not bool(entry.source_url),
             "reading_list_data": {
                 "provider": provider,
                 "status": entry.status,
@@ -783,7 +811,10 @@ async def import_reading_list(payload: ReadingListImport) -> dict[str, Any]:
         )
         imported.append(series)
         existing[key] = series
-    return {"ok": True, "imported": imported, "imported_count": len(imported), "skipped": skipped, "skipped_count": len(skipped)}
+        if entry.source_url:
+            monitored_count += 1
+            schedule_check(int(series["id"]))
+    return {"ok": True, "imported": imported, "imported_count": len(imported), "monitored_count": monitored_count, "skipped": skipped, "skipped_count": len(skipped)}
 
 
 @app.post("/api/series")

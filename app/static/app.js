@@ -129,6 +129,8 @@ const state = {
   localImportMessage: "",
   localImportBusy: false,
   readingListPreview: null,
+  readingListMatches: null,
+  readingListSelectedEntries: [],
   readingListMessage: "",
   readingListBusy: false,
 };
@@ -1322,6 +1324,39 @@ function renderReadingListSidebar() {
     atsumaru: "Atsumaru", mal: "MyAnimeList", anilist: "AniList", kenmei: "Kenmei",
     mangaupdates: "MangaUpdates", kitsu: "Kitsu", comick: "Comick",
   };
+  const matching = state.readingListMatches;
+  if (matching) {
+    const matchedCount = matching.filter((entry) => entry.matches.length > 0).length;
+    const assignedCount = matching.filter((entry) => entry.source_url).length;
+    return `
+      <div class="panel-heading"><div><h2>Confirm series and sources</h2><p>Review the suggested chapter source for every selected title.</p></div></div>
+      <div class="sidebar-block">
+        <div class="inline-alert"><strong>${matchedCount} of ${matching.length} titles have source matches</strong><p>Suggestions use only WeebCentral and Mangack to keep matching quick. Change a suggestion, paste another supported URL, or choose no source to import that title paused.</p></div>
+        ${matching.map((entry, index) => `
+          <article class="reading-list-match-row">
+            <div class="reading-list-match-heading">
+              <strong>${escapeHtml(entry.title)}</strong>
+              <span class="status-pill status-${entry.matches.length ? "enabled" : "paused"}">${entry.matches.length ? "Match found · review" : "No match · paused"}</span>
+            </div>
+            <p class="field-hint">${escapeHtml([entry.status, entry.progress !== null && entry.progress !== undefined ? `Chapter ${entry.progress}` : ""].filter(Boolean).join(" · ") || "Reading-list entry")}</p>
+            <label class="field-span"><span>Chapter source</span>
+              <select data-reading-source-choice="${index}">
+                <option value="" ${entry.source_url ? "" : "selected"}>No source · import paused</option>
+                ${entry.matches.map((match) => `<option value="${escapeHtml(match.url)}" ${entry.source_url === match.url ? "selected" : ""}>${escapeHtml(match.title)} · ${escapeHtml(match.site_name)}</option>`).join("")}
+                <option value="__manual__" ${entry.source_url && !entry.matches.some((match) => match.url === entry.source_url) ? "selected" : ""}>Use a different supported URL</option>
+              </select>
+            </label>
+            <label class="field-span"><span>Source URL (editable)</span><input data-reading-source-url="${index}" type="url" value="${escapeHtml(entry.source_url)}" placeholder="https://supported-site.example/series" /></label>
+          </article>
+        `).join("")}
+        ${state.readingListMessage ? `<div class="inline-alert"><strong>Import issue</strong><p>${escapeHtml(state.readingListMessage)}</p></div>` : ""}
+        <div class="reading-list-confirm-actions">
+          <button class="small-action" type="button" data-reading-matches-back>Back to title selection</button>
+          <button class="primary-action" type="button" data-reading-list-confirm ${state.readingListBusy ? "disabled" : ""}><span>${state.readingListBusy ? "Importing…" : `Confirm and add ${matching.length} series · ${assignedCount} with sources`}</span></button>
+        </div>
+      </div>
+    `;
+  }
   return `
     <div class="panel-heading"><div><h2>Import a reading list</h2><p>Bring your manga library into Sakurarr.</p></div></div>
     <div class="sidebar-block">
@@ -1346,7 +1381,7 @@ function renderReadingListSidebar() {
           <div class="local-folder-list reading-list-entries">
             ${preview.entries.map((entry, index) => `<label><input type="checkbox" data-reading-entry="${index}" ${entry.already_tracked ? "disabled" : "checked"}><span>${escapeHtml(entry.title)}${entry.progress !== null && entry.progress !== undefined ? ` · ch. ${escapeHtml(entry.progress)}` : ""}${entry.status ? ` · ${escapeHtml(entry.status)}` : ""}</span>${entry.already_tracked ? `<small>Already tracked as ${escapeHtml(entry.tracked_as)}</small>` : ""}</label>`).join("")}
           </div>
-          <button class="primary-action" type="button" data-reading-list-import ${state.readingListBusy || !preview.importable ? "disabled" : ""}><span>${state.readingListBusy ? "Importing…" : "Import selected titles"}</span></button>
+          <button class="primary-action" type="button" data-reading-list-match ${state.readingListBusy || !preview.importable ? "disabled" : ""}><span>${state.readingListBusy ? "Searching sources…" : "Continue to source matching"}</span></button>
         </div>
       ` : ""}
     </div>
@@ -3530,6 +3565,8 @@ $("#addSeriesMenu").addEventListener("click", async (event) => {
   }
   if (action === "reading-list") {
     state.readingListPreview = null;
+    state.readingListMatches = null;
+    state.readingListSelectedEntries = [];
     state.readingListMessage = "";
     state.readingListBusy = false;
     clearSearchPreview({ resetDraft: true });
@@ -3548,21 +3585,54 @@ $("#addSeriesMenu").addEventListener("click", async (event) => {
 });
 
 $("#sidebarPanel").addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-reading-list-import]");
-  if (!button || !state.readingListPreview) return;
-  const entries = state.readingListPreview.entries.filter((entry, index) => {
-    const checkbox = $(`#sidebarPanel [data-reading-entry="${index}"]`);
-    return checkbox?.checked && !entry.already_tracked;
-  });
-  if (!entries.length) {
-    state.readingListMessage = "Select at least one title that is not already tracked.";
+  if (event.target.closest("[data-reading-matches-back]")) {
+    state.readingListMatches = null;
+    state.readingListMessage = "";
     renderSidebar();
     return;
   }
+
+  if (event.target.closest("[data-reading-list-match]")) {
+    if (!state.readingListPreview) return;
+    const selected = state.readingListPreview.entries.filter((entry, index) => {
+      const checkbox = $(`#sidebarPanel [data-reading-entry="${index}"]`);
+      return checkbox?.checked && !entry.already_tracked;
+    });
+    if (!selected.length) {
+      state.readingListMessage = "Select at least one title that is not already tracked.";
+      renderSidebar();
+      return;
+    }
+    state.readingListSelectedEntries = selected;
+    state.readingListBusy = true;
+    state.readingListMessage = "Checking the two preferred chapter sources for each title…";
+    renderSidebar();
+    try {
+      const result = await api("/api/library/reading-list/matches", {
+        method: "POST",
+        body: JSON.stringify({ titles: selected.map((entry) => entry.title) }),
+      });
+      const matchesByTitle = new Map((result.matches || []).map((item) => [normalizeSeriesKey(item.title), item.matches || []]));
+      state.readingListMatches = selected.map((entry) => {
+        const matches = matchesByTitle.get(normalizeSeriesKey(entry.title)) || [];
+        return { ...entry, matches, source_url: matches[0]?.url || "" };
+      });
+      state.readingListMessage = "";
+    } catch (error) {
+      state.readingListMessage = error.message || "Source matching failed. You can try again or return to the title list.";
+    } finally {
+      state.readingListBusy = false;
+      renderSidebar();
+    }
+    return;
+  }
+
+  if (!event.target.closest("[data-reading-list-confirm]") || !state.readingListMatches) return;
   state.readingListBusy = true;
   state.readingListMessage = "";
   renderSidebar();
   try {
+    const entries = state.readingListMatches.map(({ matches, ...entry }) => entry);
     const result = await api("/api/library/reading-list/import", {
       method: "POST",
       body: JSON.stringify({ provider: state.readingListPreview.provider, entries }),
@@ -3572,8 +3642,11 @@ $("#sidebarPanel").addEventListener("click", async (event) => {
     state.focusTab = "chapters";
     state.sidebarMode = "chapters";
     state.readingListPreview = null;
+    state.readingListMatches = null;
+    state.readingListSelectedEntries = [];
     await refreshAll({ quiet: true });
-    setNotice(`Imported ${result.imported_count} title${result.imported_count === 1 ? "" : "s"}; skipped ${result.skipped_count} already tracked. Add a supported source to monitor imported series.`, "success");
+    const pausedCount = result.imported_count - result.monitored_count;
+    setNotice(`Imported ${result.imported_count} titles; added sources for ${result.monitored_count}, left ${pausedCount} paused, and skipped ${result.skipped_count} already tracked.`, "success");
   } catch (error) {
     state.readingListBusy = false;
     state.readingListMessage = error.message || "The reading-list import failed.";
@@ -3726,6 +3799,12 @@ listen($("#sidebarPanel"), "submit", async (event) => {
 });
 
 listen($("#sidebarPanel"), "input", async (event) => {
+  const sourceUrlField = event.target.closest("[data-reading-source-url]");
+  if (sourceUrlField && state.readingListMatches) {
+    const entry = state.readingListMatches[Number(sourceUrlField.dataset.readingSourceUrl)];
+    if (entry) entry.source_url = sourceUrlField.value.trim();
+    return;
+  }
   const form = event.target.closest("#seriesForm");
   if (!form) return;
   const target = event.target;
@@ -3747,6 +3826,17 @@ listen($("#sidebarPanel"), "input", async (event) => {
 });
 
 listen($("#sidebarPanel"), "change", async (event) => {
+  const sourceChoice = event.target.closest("[data-reading-source-choice]");
+  if (sourceChoice && state.readingListMatches) {
+    const index = Number(sourceChoice.dataset.readingSourceChoice);
+    const entry = state.readingListMatches[index];
+    if (entry) entry.source_url = sourceChoice.value === "__manual__" ? "" : sourceChoice.value;
+    renderSidebar();
+    if (sourceChoice.value === "__manual__") {
+      $(`#sidebarPanel [data-reading-source-url="${index}"]`)?.focus();
+    }
+    return;
+  }
   const form = event.target.closest("#seriesForm");
   if (form) {
     if (event.target?.name === "metadata_provider_override") {

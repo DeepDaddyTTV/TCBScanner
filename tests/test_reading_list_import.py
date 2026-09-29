@@ -93,3 +93,63 @@ def test_reading_list_import_is_paused_and_backup_round_trips(tmp_path: Path, mo
     duplicate = asyncio.run(main.import_reading_list(payload))
     assert duplicate["imported_count"] == 0
     assert duplicate["skipped"] == ["Blue Exorcist"]
+
+
+def test_reading_list_import_attaches_selected_source_and_schedules_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    database = Store(tmp_path / "app.db")
+    monkeypatch.setattr(main, "store", database)
+    scheduled: list[int] = []
+    monkeypatch.setattr(main, "schedule_check", scheduled.append)
+    payload = main.ReadingListImport(provider="kenmei", entries=[
+        main.ReadingListEntry(
+            title="Blue Exorcist",
+            source_url="https://mangack.com/manga/blue-exorcist",
+        ),
+    ])
+
+    result = asyncio.run(main.import_reading_list(payload))
+    series = database.get_series(result["imported"][0]["id"])
+    assert result["monitored_count"] == 1
+    assert series["source_url"] == "https://mangack.com/manga/blue-exorcist"
+    assert series["enabled"] is True
+    assert series["local_only"] is False
+    assert scheduled == [series["id"]]
+
+
+def test_reading_list_source_matching_uses_fast_primary_domains(monkeypatch: pytest.MonkeyPatch):
+    calls: list[str] = []
+
+    async def fake_search(title: str, limit: int):
+        calls.append(title)
+        return [{"title": f"{title} matched", "url": "https://weebcentral.com/series/test", "site_name": "WeebCentral"}]
+
+    monkeypatch.setattr(main.scraper, "search_primary_supported_series", fake_search)
+    result = asyncio.run(main.match_reading_list_sources(main.ReadingListMatchRequest(
+        titles=["Blue Exorcist", "Solo Leveling"],
+    )))
+    assert calls == ["Blue Exorcist", "Solo Leveling"]
+    assert result["searched_sites"] == ["weebcentral.com", "mangack.com"]
+    assert [item["matches"][0]["site_name"] for item in result["matches"]] == ["WeebCentral", "WeebCentral"]
+
+
+def test_primary_source_search_does_not_fan_out_to_fallback_sites(monkeypatch: pytest.MonkeyPatch):
+    import app.scraper as scraper
+
+    sites = [
+        {"provider": "weebcentral", "family": "WeebCentral", "sites": [{"domain": "weebcentral.com"}]},
+        {"provider": "wordpress_manga", "family": "WordPress", "sites": [{"domain": "mangack.com"}]},
+        {"provider": "wordpress_manga", "family": "WordPress", "sites": [{"domain": "fallback.example"}]},
+    ]
+    requested: list[str] = []
+
+    async def fake_search(query, *, provider, family, site):
+        requested.append(site["domain"])
+        return []
+
+    monkeypatch.setattr(scraper, "SUPPORTED_SOURCE_GROUPS", sites)
+    monkeypatch.setattr(scraper, "search_supported_site", fake_search)
+    assert asyncio.run(scraper.search_primary_supported_series("Blue Exorcist")) == []
+    assert set(requested) == {"weebcentral.com", "mangack.com"}

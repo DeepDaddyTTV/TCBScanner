@@ -1371,6 +1371,55 @@ async def search_supported_series(query: str, limit: int = 12) -> list[dict[str,
     ]
 
 
+async def search_primary_supported_series(query: str, limit: int = 5) -> list[dict[str, object]]:
+    """Search only the two preferred source domains for fast source matching."""
+    cleaned = " ".join(str(query or "").strip().split())
+    if len(cleaned) < 2:
+        return []
+    searchable_providers = {"wordpress_manga", "webtoon_portal", "kuramanga", "weebcentral"}
+    searchable_sites = [
+        (group, site)
+        for group in SUPPORTED_SOURCE_GROUPS
+        if str(group["provider"]) in searchable_providers
+        for site in group["sites"]
+        if str(site["domain"]) in PRIMARY_SOURCE_SEARCH_DOMAINS
+    ]
+
+    async def run_site_search(group: dict[str, object], site: dict[str, object]) -> list[SourceSearchCandidate]:
+        try:
+            return await search_supported_site(
+                cleaned,
+                provider=str(group["provider"]),
+                family=str(group["family"]),
+                site=site,
+            )
+        except Exception:
+            return []
+
+    batches = await asyncio.gather(*(run_site_search(group, site) for group, site in searchable_sites))
+    deduped: dict[str, SourceSearchCandidate] = {}
+    for batch in batches:
+        for candidate in batch:
+            previous = deduped.get(candidate.url)
+            if previous is None or candidate.score > previous.score:
+                deduped[candidate.url] = candidate
+    ranked = sorted(
+        deduped.values(),
+        key=lambda item: (-item.score, item.title.casefold(), item.site_name.casefold(), item.url),
+    )
+    return [
+        {
+            "title": item.title,
+            "url": item.url,
+            "site_name": item.site_name,
+            "site_domain": item.site_domain,
+            "provider": item.provider,
+            "family": item.family,
+        }
+        for item in ranked[: max(1, min(int(limit), 10))]
+    ]
+
+
 async def search_supported_site(
     query: str,
     *,
