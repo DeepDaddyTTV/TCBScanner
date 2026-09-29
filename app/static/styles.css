@@ -1957,6 +1957,36 @@ input[type="checkbox"] {
   box-shadow: var(--shadow);
 }
 
+.settings-view-toggle {
+  margin-top: 9px;
+}
+
+@media (min-width: 1020px) {
+  .app-frame.settings-full-view #libraryCollapseToggle {
+    visibility: hidden;
+  }
+
+  .settings-drawer.settings-full-view {
+    left: 76px;
+    width: calc(100vw - 76px);
+    max-width: none;
+    border-left: 0;
+  }
+
+  .settings-drawer.settings-full-view .settings-drawer-inner {
+    width: min(1480px, 100%);
+    margin: 0 auto;
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 1019px) {
+  .settings-view-toggle {
+    display: none;
+  }
+}
+
 .settings-drawer-inner {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

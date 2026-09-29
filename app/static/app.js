@@ -117,6 +117,7 @@ const state = {
   editDraftSeriesId: null,
   editDraftDirty: false,
   activityDrawerOpen: false,
+  settingsFullViewPreviousRailState: null,
   openErrorSeriesIds: new Set(),
   posterPickerSeriesId: null,
   posterChoices: [],
@@ -2812,9 +2813,32 @@ function toggleOptionsPanel(forceOpen) {
   const panel = $("#settingsDrawer");
   if (!panel) return;
   const isOpen = typeof forceOpen === "boolean" ? forceOpen : panel.classList.contains("hidden");
+  if (!isOpen) setSettingsFullView(false);
   panel.classList.toggle("hidden", !isOpen);
   panel.setAttribute("aria-hidden", String(!isOpen));
   $("#optionsToggle").setAttribute("aria-expanded", String(isOpen));
+}
+
+function setSettingsFullView(expanded) {
+  const panel = $("#settingsDrawer");
+  const frame = $(".app-frame");
+  const toggle = $("#settingsFullViewToggle");
+  const canExpand = window.matchMedia("(min-width: 1020px)").matches;
+  const shouldExpand = Boolean(expanded && canExpand);
+  if (shouldExpand && !panel?.classList.contains("settings-full-view")) {
+    state.settingsFullViewPreviousRailState = frame?.classList.contains("library-collapsed") || false;
+    setLibraryRailCollapsed(true, false);
+  }
+  frame?.classList.toggle("settings-full-view", shouldExpand);
+  panel?.classList.toggle("settings-full-view", shouldExpand);
+  if (!shouldExpand && panel?.classList.contains("settings-full-view") === false && state.settingsFullViewPreviousRailState !== null) {
+    setLibraryRailCollapsed(state.settingsFullViewPreviousRailState, false);
+    state.settingsFullViewPreviousRailState = null;
+  }
+  if (toggle) {
+    toggle.textContent = shouldExpand ? "Return to sidebar" : "Open full settings";
+    toggle.setAttribute("aria-expanded", String(shouldExpand));
+  }
 }
 
 function isChapterSelectable(chapter) {
@@ -4096,6 +4120,9 @@ listen($("#sidebarPanel"), "click", async (event) => {
 });
 
 $("#optionsToggle").addEventListener("click", toggleOptionsPanel);
+$("#settingsFullViewToggle").addEventListener("click", () => {
+  setSettingsFullView(!$("#settingsDrawer").classList.contains("settings-full-view"));
+});
 $("#settingsDrawerClose").addEventListener("click", () => {
   toggleOptionsPanel(false);
 });
