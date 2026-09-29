@@ -14,10 +14,12 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from .downloader import MangaDownloader, render_naming_template
 from . import scraper
+from .reading_list_import import MAX_IMPORT_ENTRIES, PROVIDERS, normalize_title_key, parse_reading_list
 from .store import DEFAULT_NAMING_FORMAT, Store
 
 
@@ -281,6 +283,46 @@ class LocalSeriesImport(BaseModel):
         if cleaned and (not cleaned.startswith(("http://", "https://")) or not scraper.host_is_supported(cleaned)):
             raise ValueError("Enter a supported http or https manga source URL, or leave it blank for a local-only series.")
         return cleaned
+
+
+class ReadingListPreview(BaseModel):
+    provider: str = Field(min_length=1, max_length=24)
+    filename: str = Field(default="reading-list.csv", max_length=200)
+    contents: str = Field(min_length=1, max_length=5 * 1024 * 1024)
+
+
+class ReadingListEntry(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    status: str = Field(default="", max_length=80)
+    progress: int | None = Field(default=None, ge=0)
+    score: float | None = Field(default=None, ge=0)
+    external_id: str = Field(default="", max_length=100)
+
+
+class ReadingListImport(BaseModel):
+    provider: str = Field(min_length=1, max_length=24)
+    entries: list[ReadingListEntry] = Field(min_length=1, max_length=MAX_IMPORT_ENTRIES)
+
+
+def _reading_list_preview(provider: str, entries: list[dict[str, Any]]) -> dict[str, Any]:
+    existing = {
+        normalize_title_key(item.get("title")): item
+        for item in store.list_series()
+    }
+    for entry in entries:
+        key = normalize_title_key(entry.get("title"))
+        match = existing.get(key)
+        entry["already_tracked"] = bool(match)
+        entry["tracked_as"] = str(match.get("title")) if match else ""
+    return {
+        "provider": provider,
+        "provider_name": PROVIDERS.get(provider, provider),
+        "entries": entries,
+        "total": len(entries),
+        "already_tracked": sum(1 for entry in entries if entry["already_tracked"]),
+        "importable": sum(1 for entry in entries if not entry["already_tracked"]),
+        "notice": "Imported titles are paused until you add a supported chapter source in Series Settings.",
+    }
 
 
 @app.on_event("startup")
@@ -646,6 +688,104 @@ async def import_local_series(payload: LocalSeriesImport) -> dict[str, Any]:
     return {"ok": True, "series": store.get_series(int(series["id"])), "imported_chapters": len(chapters)}
 
 
+@app.post("/api/library/reading-list/preview")
+async def preview_reading_list(payload: ReadingListPreview) -> dict[str, Any]:
+    provider = payload.provider.strip().lower()
+    try:
+        entries = parse_reading_list(payload.contents, payload.filename, provider)
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _reading_list_preview(provider, entries)
+
+
+@app.post("/api/library/reading-list/anilist/{username}")
+async def preview_anilist_reading_list(username: str) -> dict[str, Any]:
+    username = username.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", username):
+        raise HTTPException(status_code=400, detail="Enter a valid public AniList username.")
+    query = """
+      query ($name: String) {
+        User(name: $name) {
+          name
+          mediaList(type: MANGA, perChunk: 500) {
+            status
+            progress
+            score
+            media { id title { english romaji userPreferred } }
+          }
+        }
+      }
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            response = await client.post(
+                "https://graphql.anilist.co",
+                json={"query": query, "variables": {"name": username}},
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+            )
+            response.raise_for_status()
+            entries = parse_reading_list(response.text, "anilist.json", "anilist")
+    except httpx.HTTPStatusError as exc:
+        message = "AniList did not return that public manga list."
+        try:
+            errors = exc.response.json().get("errors", [])
+            if errors and "message" in errors[0]:
+                message = str(errors[0]["message"])[:240]
+        except (ValueError, AttributeError):
+            pass
+        raise HTTPException(status_code=502, detail=message) from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Could not retrieve that public AniList list right now.") from exc
+    if not entries:
+        raise HTTPException(status_code=404, detail="That AniList account has no manga entries to import.")
+    return _reading_list_preview("anilist", entries)
+
+
+@app.post("/api/library/reading-list/import")
+async def import_reading_list(payload: ReadingListImport) -> dict[str, Any]:
+    provider = payload.provider.strip().lower()
+    if provider not in PROVIDERS:
+        raise HTTPException(status_code=400, detail="Choose a supported reading-list provider.")
+    existing = {
+        normalize_title_key(item.get("title")): item
+        for item in store.list_series()
+    }
+    imported: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    for entry in payload.entries:
+        key = normalize_title_key(entry.title)
+        if not key or key in existing:
+            skipped.append(entry.title)
+            continue
+        series = store.create_series({
+            "title": entry.title,
+            "source_url": "",
+            "folder": entry.title,
+            "check_interval_minutes": 1440,
+            "enabled": False,
+            "backfill_existing": False,
+            "naming_format": store.get_default_naming_format(),
+            "metadata_provider": store.get_setting("default_metadata_provider") or DEFAULT_METADATA_PROVIDER,
+            "preferred_translator": "auto",
+            "local_only": True,
+            "reading_list_data": {
+                "provider": provider,
+                "status": entry.status,
+                "progress": entry.progress,
+                "score": entry.score,
+                "external_id": entry.external_id,
+            },
+        })
+        store.add_event(
+            int(series["id"]), None, "info",
+            f"Imported from {PROVIDERS[provider]}'s reading list"
+            + (f" at chapter {entry.progress}." if entry.progress is not None else "."),
+        )
+        imported.append(series)
+        existing[key] = series
+    return {"ok": True, "imported": imported, "imported_count": len(imported), "skipped": skipped, "skipped_count": len(skipped)}
+
+
 @app.post("/api/series")
 async def create_series(payload: SeriesCreate) -> dict[str, Any]:
     data = payload.model_dump()
@@ -692,6 +832,7 @@ async def update_series(series_id: int, payload: SeriesUpdate) -> dict[str, Any]
         data.get("backup_source_urls", []),
     )
     data["check_interval_minutes"] = int(round(float(data.pop("check_interval_hours")) * 60))
+    data["reading_list_data"] = existing.get("reading_list_data")
     if not data["folder"]:
         data["folder"] = data["title"]
     series = store.update_series(series_id, data)

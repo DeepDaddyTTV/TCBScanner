@@ -1,6 +1,6 @@
 services:
   tcbscanner:
-    image: ghcr.io/deepdaddyttv/sakurarr:latest
+    image: ghcr.io/deepdaddyttv/sakurarr:dev
     container_name: tcb_scanner
     restart: unless-stopped
     user: "0:0"

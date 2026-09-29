@@ -13,7 +13,7 @@ Use this compose file as a starting point:
 ```yaml
 services:
   tcbscanner:
-    image: ghcr.io/deepdaddyttv/sakurarr:latest
+    image: ghcr.io/deepdaddyttv/sakurarr:dev
     container_name: tcb_scanner
     restart: unless-stopped
     user: "0:0"
@@ -49,7 +49,7 @@ Open [http://localhost:18080](http://localhost:18080).
 
 Compose settings:
 
-- `image`: Published container image. Use `ghcr.io/deepdaddyttv/sakurarr:latest` for the current release.
+- `image`: Incremental builds use `ghcr.io/deepdaddyttv/sakurarr:dev`. Stable tags are reserved for approved major releases.
 - `container_name`: Friendly Docker container name.
 - `restart`: Keeps the scanner running after Docker or host restarts.
 - `user`: Runs the container as `root` by default so mounted manga folders can be written even when the host folder owner does not match a container user.
@@ -71,6 +71,8 @@ Supported environment variables:
 - `APP_VERSION`: Version label shown in the footer. The GitHub image pipeline reads the release version from the root `VERSION` file.
 
 Downloads interrupted by a container or host restart are automatically returned to the pending queue when the app starts again.
+
+Reading lists can be imported from the add-series menu using CSV, JSON, or XML exports from Atsumaru, MyAnimeList, AniList, Kenmei, MangaUpdates, Kitsu, or Comick. Public AniList lists can also be imported by username. Imported titles remain paused until a supported chapter source is added in their settings; the import preserves list status and reading progress and never asks for provider credentials.
 
 ## Supported Sites
 

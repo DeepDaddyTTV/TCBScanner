@@ -128,6 +128,9 @@ const state = {
   localImportFolder: "",
   localImportMessage: "",
   localImportBusy: false,
+  readingListPreview: null,
+  readingListMessage: "",
+  readingListBusy: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -1000,7 +1003,7 @@ function renderTrackedSeriesCard(series, { searchMode = false } = {}) {
         <div class="series-top">
           <div class="series-copy">
             <h3>${escapeHtml(series.title)}</h3>
-            <p>${escapeHtml(series.local_only ? "Local only" : getHostLabel(series.source_url))}</p>
+            <p>${escapeHtml(series.reading_list_data && !series.source_url ? "Needs chapter source" : series.local_only ? "Local only" : getHostLabel(series.source_url))}</p>
           </div>
           <span class="status-pill status-${series.enabled ? "enabled" : "paused"}">
             ${series.enabled ? "Monitored" : "Paused"}
@@ -1100,7 +1103,9 @@ function renderSeriesFocus() {
     ? ` style="--focus-art: url('${focusArtUrl.replaceAll("'", "%27")}')"`
     : "";
   const namingPreview = getNamingPreview(focusSeries);
-  const sourceDisplay = focusSeries.local_only ? "Local-only import" : formatSourceDisplay(focusSeries.source_url);
+  const importedList = focusSeries.reading_list_data;
+  const importedProvider = importedList?.provider ? ({ atsumaru: "Atsumaru", mal: "MyAnimeList", anilist: "AniList", kenmei: "Kenmei", mangaupdates: "MangaUpdates", kitsu: "Kitsu", comick: "Comick" })[importedList.provider] || importedList.provider : "";
+  const sourceDisplay = importedList && !focusSeries.source_url ? `Needs chapter source · imported from ${importedProvider}` : focusSeries.local_only ? "Local-only import" : formatSourceDisplay(focusSeries.source_url);
   const folderDisplay = formatFolderDisplay(focusSeries.folder || focusSeries.title);
   const focusIdentity = isPreview
     ? 'data-preview="true"'
@@ -1137,6 +1142,7 @@ function renderSeriesFocus() {
             <strong>Source:</strong>
             ${focusSeries.source_url ? `<a class="focus-link" href="${escapeHtml(focusSeries.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(sourceDisplay)}</a>` : `<span>${escapeHtml(sourceDisplay)}</span>`}
           </p>
+          ${importedList ? `<p class="focus-detail"><strong>Reading list:</strong><span>${escapeHtml(importedProvider)}${importedList.status ? ` · ${escapeHtml(importedList.status)}` : ""}${importedList.progress !== null && importedList.progress !== undefined ? ` · chapter ${escapeHtml(importedList.progress)}` : ""}${importedList.score ? ` · score ${escapeHtml(importedList.score)}` : ""}</span></p>` : ""}
           <div class="focus-detail-grid">
             <span><strong>Library:</strong><em>${escapeHtml(focusSeries.title)}</em></span>
             <span><strong>Folder:</strong><em>${escapeHtml(folderDisplay)}</em></span>
@@ -1170,6 +1176,10 @@ function renderSidebar() {
 
   const selected = getSelectedSeries();
   const preview = getPreviewSeries();
+  if (state.sidebarMode === "reading-list-import") {
+    panel.innerHTML = renderReadingListSidebar();
+    return;
+  }
   if (state.sidebarMode === "local-import") {
     panel.innerHTML = renderLocalImportSidebar();
     return;
@@ -1303,6 +1313,43 @@ function renderLocalImportSidebar() {
       ${state.localImportMessage ? `<div class="inline-alert"><strong>Import issue</strong><p>${escapeHtml(state.localImportMessage)}</p></div>` : ""}
     </div>
     ${selected ? `<div class="sidebar-block"><p class="local-folder-path">Selected folder: ${escapeHtml(selected)}</p><button class="small-action compact-action" type="button" data-local-folder-clear>Choose another folder</button></div>${form}` : ""}
+  `;
+}
+
+function renderReadingListSidebar() {
+  const preview = state.readingListPreview;
+  const providerNames = {
+    atsumaru: "Atsumaru", mal: "MyAnimeList", anilist: "AniList", kenmei: "Kenmei",
+    mangaupdates: "MangaUpdates", kitsu: "Kitsu", comick: "Comick",
+  };
+  return `
+    <div class="panel-heading"><div><h2>Import a reading list</h2><p>Bring your manga library into Sakurarr.</p></div></div>
+    <div class="sidebar-block">
+      <div class="inline-alert"><strong>Importing adds paused series</strong><p>Reading-list sites don’t provide Sakurarr with a chapter source. Add a supported source in each series’ Settings to start monitoring. No account passwords are requested.</p></div>
+      <form class="series-form" id="readingListForm">
+        <label class="field-span"><span>Reading-list provider</span>
+          <select name="provider" required>
+            ${Object.entries(providerNames).map(([id, name]) => `<option value="${id}" ${id === "anilist" ? "selected" : ""}>${name}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field-span"><span>AniList username</span><input name="username" maxlength="40" placeholder="Public username" /></label>
+        <label class="field-span"><span>Export file (CSV, JSON, or XML)</span><input name="file" type="file" accept=".csv,.json,.xml,text/csv,application/json,text/xml,application/xml" /></label>
+        <small class="field-hint">Use the provider’s export file. AniList can also import directly from a public username.</small>
+        <button class="primary-action field-span" type="submit" ${state.readingListBusy ? "disabled" : ""}>${icons.download}<span>${state.readingListBusy ? "Reading list…" : "Preview import"}</span></button>
+      </form>
+      ${state.readingListMessage ? `<div class="inline-alert"><strong>Import issue</strong><p>${escapeHtml(state.readingListMessage)}</p></div>` : ""}
+      ${preview ? `
+        <div class="reading-list-preview">
+          <h3>${escapeHtml(providerNames[preview.provider] || preview.provider)} · ${preview.total} titles</h3>
+          <p>${preview.importable} can be added; ${preview.already_tracked} already tracked.</p>
+          <p class="field-hint">${escapeHtml(preview.notice)}</p>
+          <div class="local-folder-list reading-list-entries">
+            ${preview.entries.map((entry, index) => `<label><input type="checkbox" data-reading-entry="${index}" ${entry.already_tracked ? "disabled" : "checked"}><span>${escapeHtml(entry.title)}${entry.progress !== null && entry.progress !== undefined ? ` · ch. ${escapeHtml(entry.progress)}` : ""}${entry.status ? ` · ${escapeHtml(entry.status)}` : ""}</span>${entry.already_tracked ? `<small>Already tracked as ${escapeHtml(entry.tracked_as)}</small>` : ""}</label>`).join("")}
+          </div>
+          <button class="primary-action" type="button" data-reading-list-import ${state.readingListBusy || !preview.importable ? "disabled" : ""}><span>${state.readingListBusy ? "Importing…" : "Import selected titles"}</span></button>
+        </div>
+      ` : ""}
+    </div>
   `;
 }
 
@@ -1723,7 +1770,7 @@ function renderSearchResults(hasQuery, hasResults, results) {
                   (series) => `
                     <button class="sidebar-result-button" type="button" data-sidebar-select-series="${series.id}">
                       <strong>${escapeHtml(series.title)}</strong>
-                      <span>${escapeHtml(series.local_only ? "Local only" : getHostLabel(series.source_url))}</span>
+                      <span>${escapeHtml(series.reading_list_data && !series.source_url ? "Needs source" : series.local_only ? "Local only" : getHostLabel(series.source_url))}</span>
                     </button>
                   `,
                 )
@@ -3481,6 +3528,15 @@ $("#addSeriesMenu").addEventListener("click", async (event) => {
     await openLocalImport();
     return;
   }
+  if (action === "reading-list") {
+    state.readingListPreview = null;
+    state.readingListMessage = "";
+    state.readingListBusy = false;
+    clearSearchPreview({ resetDraft: true });
+    setSidebarMode("reading-list-import");
+    renderAll();
+    return;
+  }
   setSidebarMode("discover");
   clearSearchPreview({ resetDraft: true });
   renderAll();
@@ -3488,6 +3544,40 @@ $("#addSeriesMenu").addEventListener("click", async (event) => {
   if (searchInput) {
     searchInput.focus();
     searchInput.select();
+  }
+});
+
+$("#sidebarPanel").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-reading-list-import]");
+  if (!button || !state.readingListPreview) return;
+  const entries = state.readingListPreview.entries.filter((entry, index) => {
+    const checkbox = $(`#sidebarPanel [data-reading-entry="${index}"]`);
+    return checkbox?.checked && !entry.already_tracked;
+  });
+  if (!entries.length) {
+    state.readingListMessage = "Select at least one title that is not already tracked.";
+    renderSidebar();
+    return;
+  }
+  state.readingListBusy = true;
+  state.readingListMessage = "";
+  renderSidebar();
+  try {
+    const result = await api("/api/library/reading-list/import", {
+      method: "POST",
+      body: JSON.stringify({ provider: state.readingListPreview.provider, entries }),
+    });
+    const firstId = Number(result.imported?.[0]?.id || 0);
+    state.selectedSeriesId = firstId || state.selectedSeriesId;
+    state.focusTab = "chapters";
+    state.sidebarMode = "chapters";
+    state.readingListPreview = null;
+    await refreshAll({ quiet: true });
+    setNotice(`Imported ${result.imported_count} title${result.imported_count === 1 ? "" : "s"}; skipped ${result.skipped_count} already tracked. Add a supported source to monitor imported series.`, "success");
+  } catch (error) {
+    state.readingListBusy = false;
+    state.readingListMessage = error.message || "The reading-list import failed.";
+    renderSidebar();
   }
 });
 
@@ -3517,7 +3607,7 @@ document.addEventListener("click", (event) => {
 });
 
 listen($("#sidebarPanel"), "submit", async (event) => {
-  const form = event.target.closest("#seriesForm, #sidebarSearchForm, #localImportForm");
+  const form = event.target.closest("#seriesForm, #sidebarSearchForm, #localImportForm, #readingListForm");
   if (!form) return;
   event.preventDefault();
 
@@ -3547,6 +3637,34 @@ listen($("#sidebarPanel"), "submit", async (event) => {
     } catch (error) {
       state.localImportBusy = false;
       state.localImportMessage = error.message || "The local import failed.";
+      renderSidebar();
+    }
+    return;
+  }
+
+  if (form.id === "readingListForm") {
+    state.readingListBusy = true;
+    state.readingListMessage = "";
+    renderSidebar();
+    try {
+      const data = new FormData(form);
+      const provider = String(data.get("provider") || "anilist");
+      const file = data.get("file");
+      if (provider === "anilist" && !file && String(data.get("username") || "").trim()) {
+        state.readingListPreview = await api(`/api/library/reading-list/anilist/${encodeURIComponent(String(data.get("username")).trim())}`, { method: "POST", body: JSON.stringify({}) });
+      } else if (file instanceof File && file.size) {
+        state.readingListPreview = await api("/api/library/reading-list/preview", {
+          method: "POST",
+          body: JSON.stringify({ provider, filename: file.name, contents: await file.text() }),
+        });
+      } else {
+        throw new Error(provider === "anilist" ? "Enter a public AniList username or choose an export file." : "Choose a reading-list export file.");
+      }
+    } catch (error) {
+      state.readingListMessage = error.message || "Could not read that export.";
+      state.readingListPreview = null;
+    } finally {
+      state.readingListBusy = false;
       renderSidebar();
     }
     return;

@@ -15,7 +15,7 @@ def utc_now() -> str:
 
 DEFAULT_NAMING_FORMAT = "{ChapterFullTitle}"
 LEGACY_DEFAULT_NAMING_FORMAT = "{ChapterTitle}"
-SNAPSHOT_SCHEMA_VERSION = 6
+SNAPSHOT_SCHEMA_VERSION = 7
 
 
 def normalize_backup_source_urls(value: Any) -> list[str]:
@@ -129,6 +129,7 @@ class Store:
             self._ensure_column("series", "metadata_chapter_count", "INTEGER")
             self._ensure_column("series", "preferred_translator", "TEXT NOT NULL DEFAULT 'auto'")
             self._ensure_column("series", "local_only", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column("series", "reading_list_data", "TEXT")
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO settings (key, value)
@@ -166,9 +167,10 @@ class Store:
                     enabled, backfill_existing, initialized, created_at, naming_format,
                     poster_image_url, backup_source_urls, metadata_provider,
                     metadata_provider_override, metadata_id, metadata_title,
-                    metadata_url, metadata_chapter_count, preferred_translator, local_only
+                    metadata_url, metadata_chapter_count, preferred_translator, local_only,
+                    reading_list_data
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["title"],
@@ -189,6 +191,7 @@ class Store:
                     payload.get("metadata_chapter_count"),
                     payload.get("preferred_translator") or "auto",
                     1 if payload.get("local_only", False) else 0,
+                    json.dumps(payload.get("reading_list_data"), separators=(",", ":")) if payload.get("reading_list_data") else None,
                 ),
             )
             series_id = int(cur.lastrowid)
@@ -216,7 +219,8 @@ class Store:
                     metadata_url = ?,
                     metadata_chapter_count = ?,
                     preferred_translator = ?,
-                    local_only = ?
+                    local_only = ?,
+                    reading_list_data = ?
                 WHERE id = ?
                 """,
                 (
@@ -237,6 +241,7 @@ class Store:
                     payload.get("metadata_chapter_count"),
                     payload.get("preferred_translator") or "auto",
                     1 if payload.get("local_only", False) else 0,
+                    json.dumps(payload.get("reading_list_data"), separators=(",", ":")) if payload.get("reading_list_data") else None,
                     series_id,
                 ),
             )
@@ -734,7 +739,7 @@ class Store:
             ]
 
         return {
-            "app_name": "TCBScanner",
+            "app_name": "Sakurarr",
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
             "exported_at": utc_now(),
             "settings": settings,
@@ -770,9 +775,9 @@ class Store:
                         last_checked_at, last_error, naming_format, poster_image_url,
                         backup_source_urls, metadata_provider, metadata_provider_override,
                         metadata_id, metadata_title, metadata_url, metadata_chapter_count,
-                        preferred_translator, local_only
+                        preferred_translator, local_only, reading_list_data
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -798,6 +803,7 @@ class Store:
                             row.get("metadata_chapter_count"),
                             row.get("preferred_translator") or "auto",
                             1 if row.get("local_only", False) else 0,
+                            json.dumps(row.get("reading_list_data"), separators=(",", ":")) if row.get("reading_list_data") else None,
                         )
                         for row in snapshot["series"]
                     ],
@@ -1007,6 +1013,7 @@ class Store:
                         row.get("preferred_translator") or "auto"
                     ) or "auto",
                     "local_only": local_only,
+                    "reading_list_data": row.get("reading_list_data") if isinstance(row.get("reading_list_data"), dict) else None,
                 }
             )
         return normalized
@@ -1164,6 +1171,11 @@ class Store:
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)
+        if data.get("reading_list_data"):
+            try:
+                data["reading_list_data"] = json.loads(data["reading_list_data"])
+            except (TypeError, json.JSONDecodeError):
+                data["reading_list_data"] = None
         for key in (
             "enabled",
             "backfill_existing",
