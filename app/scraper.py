@@ -2667,7 +2667,7 @@ def parse_chapter_key(title: str, url: str) -> tuple[str, float]:
     candidates = [title, url.replace("-", " ").replace("/", " ")]
     for candidate in candidates:
         match = re.search(
-            r"\b(?:chapter|ch)\s*[-:]?\s*(\d+(?:\.\d+)?)\b",
+            r"\b(?:chapter|ch\.?|episode|ep\.?|punch)\s*[-:#]?\s*(\d+(?:\.\d+)?)\b",
             candidate,
             re.IGNORECASE,
         )
