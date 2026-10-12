@@ -27,6 +27,8 @@ def registry(tmp_path: Path, **overrides: object) -> CanonicalIdentities:
                 "artists": ["A. Artist"],
                 "source_urls": ["https://weebcentral.com/series/KNOWN-ID/Moon-Hero"],
                 "metadata_ids": ["anilist:123"],
+                "language": "en",
+                "manga": "YesAndRightToLeft",
             },
             "Moon Hero (Color)": {"folder": "Moon Hero (Color)", "writers": ["Jane Doe"]},
         },
@@ -85,6 +87,8 @@ def test_comicinfo_preserves_numbers_roles_pages_and_xml_text(tmp_path: Path, nu
     assert node.findtext("Writer") == "Jane Doe"
     assert node.findtext("Penciller") == "A. Artist"
     assert node.findtext("PageCount") == "2"
+    assert node.findtext("LanguageISO") == "en"
+    assert node.findtext("Manga") == "YesAndRightToLeft"
     assert [x.attrib["Image"] for x in node.findall("Pages/Page")] == ["0", "1"]
 
 

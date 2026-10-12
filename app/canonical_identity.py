@@ -56,9 +56,11 @@ class CanonicalIdentities:
                 values = profile.get(field, [])
                 if not isinstance(values, list) or any(not isinstance(x, str) for x in values):
                     raise ValueError("Invalid canonical series profile.")
-            for field in ["folder", "library_root"]:
+            for field in ["folder", "library_root", "language"]:
                 if field in profile and not isinstance(profile[field], str):
                     raise ValueError("Invalid canonical series path.")
+            if profile.get("manga") not in [None, "Unknown", "No", "Yes", "YesAndRightToLeft"]:
+                raise ValueError("Invalid canonical reading direction.")
             sources = {source_key(url) for url in profile.get("source_urls", [])}
             if sources.intersection(source_key(str(url)) for url in source_urls if url):
                 matches.add(name)
@@ -85,6 +87,8 @@ class CanonicalIdentities:
             artists=list(dict.fromkeys(aliases.get(identity_key(x), x) for x in profile.get("artists", []))),
             canonical_identity=name,
             canonical_title_aliases=[name, *profile.get("aliases", []), str(series.get("title") or "")],
+            language=profile.get("language"),
+            manga=profile.get("manga"),
         )
         # Already configured paths may have a deliberate spelling or custom location.
         # Rewrite only the known alias component, retaining the selected root/category.
@@ -130,7 +134,9 @@ def comic_info(series: dict[str, Any], chapter: dict[str, Any], page_count: int)
         "Penciller": ", ".join(series.get("artists") or []),
         "Web": str(chapter.get("source_url") or series.get("source_url") or ""),
         "PageCount": str(page_count),
+        "LanguageISO": str(series.get("language") or ""),
         "Format": "Chapter",
+        "Manga": str(series.get("manga") or ""),
     }
     for key, value in fields.items():
         if value:
