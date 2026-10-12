@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import httpx
 
 from . import scraper
+from .canonical_identity import CanonicalIdentities, canonical_chapter, comic_info
 from .store import Store
 
 
@@ -26,12 +27,14 @@ class MangaDownloader:
         library_roots: list[Path],
         work_dir: Path,
         request_delay: float,
+        identities: CanonicalIdentities | None = None,
     ) -> None:
         self.store = store
         self.library_roots = [path.resolve() for path in library_roots if str(path).strip()]
         self.primary_library_dir = self.library_roots[0] if self.library_roots else Path("/library").resolve()
         self.work_dir = work_dir
         self.request_delay = request_delay
+        self.identities = identities or CanonicalIdentities()
         self._download_lock = asyncio.Lock()
         self._cancelled_series: set[int] = set()
         for library_root in self.library_roots or [self.primary_library_dir]:
@@ -223,6 +226,8 @@ class MangaDownloader:
         )
         staging_dir = self.work_dir / f"series-{series['id']}" / f"chapter-{chapter_id}"
         try:
+            export_series = self.identities.resolve(series, self.library_roots)
+            export_chapter = canonical_chapter(export_series, chapter)
             if staging_dir.exists():
                 shutil.rmtree(staging_dir)
             staging_dir.mkdir(parents=True, exist_ok=True)
@@ -254,12 +259,13 @@ class MangaDownloader:
                 image_path.write_bytes(content)
                 image_paths.append(image_path)
 
-            destination = self._chapter_cbz_path(series, chapter, page_count=len(image_paths))
+            destination = self._chapter_cbz_path(export_series, export_chapter, page_count=len(image_paths))
             destination.parent.mkdir(parents=True, exist_ok=True)
             temp_destination = destination.with_suffix(destination.suffix + ".tmp")
             with zipfile.ZipFile(temp_destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for image_path in image_paths:
                     archive.write(image_path, image_path.name)
+                archive.writestr("ComicInfo.xml", comic_info(export_series, export_chapter, len(image_paths)))
             temp_destination.replace(destination)
 
             self.store.set_chapter_status(
