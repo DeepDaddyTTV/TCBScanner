@@ -217,5 +217,13 @@ Unknown variables are ignored. File names are sanitized before writing to the ma
 
 ## Notes
 
-- CBZ files are just ZIP files with images stored as `001.ext`, `002.ext`, and so on.
+- CBZ files contain images stored as `001.ext`, `002.ext`, and so on, plus standard `ComicInfo.xml` series, creator, chapter-number and page metadata. Writer and artist credits are separate; chapter numbers retain decimal and special labels. Images are packaged without recompression.
+
+### Canonical names for future downloads
+
+An optional private JSON file at `/data/canonical-identities.json` supplies curated names and creator credits before exports are named and packaged. Set `CANONICAL_IDENTITIES_FILE` to use a different path. The file stays in your data volume and is never included in an image or library export.
+
+The file uses `version: 1`, an `author_aliases` map keyed by trimmed, Unicode-normalized, case-folded names, and a `comic_series` object keyed by canonical series name. Each series may specify `aliases`, `writers`, `artists`, `source_urls`, `metadata_ids` (such as `anilist:123`), `folder`, and `library_root`. A configured root must be one of Sakurarr's library roots. A known default folder uses that category; custom folder locations are preserved.
+
+Only curated aliases or exact source/catalog identities match. Unknown names remain distinct. Conflicting identities stop that export instead of merging editions. Keep color editions, adaptations and alternate creators as separate profiles. Configured invalid files stop exports with an error; an absent file leaves configured names unchanged. Existing catalog IDs, queue entries and files are not rewritten when this option is enabled.
 - The app downloads one chapter at a time to keep requests gentle.
