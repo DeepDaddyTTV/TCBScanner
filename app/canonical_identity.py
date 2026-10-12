@@ -69,10 +69,14 @@ class CanonicalIdentities:
             if provider and ident and f"{provider}:{ident}" in profile.get("metadata_ids", []):
                 matches.add(name)
         title = identity_key(str(series.get("title") or ""))
+        known_title = False
         for name, profile in profiles.items():
             known_names = {identity_key(name), *(identity_key(x) for x in profile.get("aliases", []))}
             if title in known_names:
+                known_title = True
                 matches.add(name)
+        if matches and not known_title and re.search(r"\([^()]+\)\s*$", str(series.get("title") or "")):
+            raise ValueError("Unrecognized edition qualifier; add an explicit canonical profile before export.")
         if len(matches) > 1:
             raise ValueError("Conflicting canonical series identities; download export stopped.")
         if not matches:
@@ -94,7 +98,7 @@ class CanonicalIdentities:
         # Rewrite only the known alias component, retaining the selected root/category.
         folder = str(series.get("folder") or "")
         basename = re.split(r"[\\/]+", folder.rstrip("/\\"))[-1]
-        known = {identity_key(name), *(identity_key(x) for x in profile.get("aliases", []))}
+        known = {identity_key(name), title, *(identity_key(x) for x in profile.get("aliases", []))}
         canonical_folder = str(profile.get("folder") or name)
         root = profile.get("library_root")
         if root and (not folder or ("/" not in folder and "\\" not in folder and identity_key(folder) in known)):

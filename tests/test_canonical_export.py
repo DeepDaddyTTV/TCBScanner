@@ -66,6 +66,13 @@ def test_editions_unknown_titles_and_custom_folders_remain_distinct(tmp_path: Pa
 def test_conflicting_edition_and_source_id_stop_export(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Conflicting"):
         registry(tmp_path).resolve({"title": "Moon Hero (Color)", "metadata_provider": "anilist", "metadata_id": "123"})
+    with pytest.raises(ValueError, match="edition qualifier"):
+        registry(tmp_path).resolve({"title": "Moon Hero (ONE)", "metadata_provider": "anilist", "metadata_id": "123"})
+
+
+def test_identified_provider_title_reuses_canonical_folder(tmp_path: Path) -> None:
+    source = {"title": "Provider alternate title", "folder": "/manga/Provider alternate title", "metadata_provider": "anilist", "metadata_id": "123"}
+    assert registry(tmp_path).resolve(source)["folder"] == "/manga/Moon Hero"
 
 
 def test_known_default_folder_uses_configured_category_root(tmp_path: Path) -> None:
