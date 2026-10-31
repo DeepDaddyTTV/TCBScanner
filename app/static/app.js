@@ -134,6 +134,8 @@ const state = {
   readingListSelectedEntries: [],
   readingListMessage: "",
   readingListBusy: false,
+  mobileView: "library",
+  mobileSettingsPreviousView: "library",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -569,6 +571,7 @@ function selectSearchPreview(match) {
   setSidebarMode("discover");
   setNotice(`Prepared ${match.title} from ${match.site_name}. Adjust the settings on the right, then track it.`, "success");
   renderAll();
+  if (window.matchMedia("(max-width: 1019px)").matches) setMobileView("queue");
   void queueArtworkHydration([{ title: match.title, source_url: match.url }]);
 }
 
@@ -2802,10 +2805,52 @@ function setLibraryStatsCollapsed(collapsed, persist = true) {
 }
 
 function initLibraryStats() {
-  setLibraryStatsCollapsed(localStorage.getItem(libraryStatsKey) === "true", false);
+  const saved = localStorage.getItem(libraryStatsKey);
+  const defaultCollapsed = window.matchMedia("(max-width: 1019px)").matches;
+  setLibraryStatsCollapsed(saved === null ? defaultCollapsed : saved === "true", false);
   $("#libraryStatsToggle")?.addEventListener("click", () => {
     const collapsed = $("#librarySection")?.classList.contains("library-stats-collapsed");
     setLibraryStatsCollapsed(!collapsed);
+  });
+  window.addEventListener("resize", () => {
+    if (localStorage.getItem(libraryStatsKey) === null) {
+      setLibraryStatsCollapsed(window.matchMedia("(max-width: 1019px)").matches, false);
+    }
+  });
+}
+
+function syncMobileView() {
+  const frame = $(".app-frame");
+  if (!frame) return;
+  frame.dataset.mobileView = state.mobileView;
+  document.querySelectorAll("#mobileDock [data-mobile-view]").forEach((button) => {
+    if (button.dataset.mobileView === state.mobileView) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
+
+function setMobileView(view) {
+  if (view === "settings") {
+    toggleOptionsPanel(true);
+    return;
+  }
+  if (state.mobileView === "settings") toggleOptionsPanel(false);
+  state.mobileView = view;
+  if (view === "add" && state.sidebarMode !== "discover") {
+    resetDiscoverDraft();
+    setSidebarMode("discover");
+    renderSidebar();
+  }
+  syncMobileView();
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+function initMobileNavigation() {
+  syncMobileView();
+  $("#mobileDock")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mobile-view]");
+    if (!button) return;
+    setMobileView(button.dataset.mobileView);
   });
 }
 
@@ -2817,6 +2862,15 @@ function toggleOptionsPanel(forceOpen) {
   panel.classList.toggle("hidden", !isOpen);
   panel.setAttribute("aria-hidden", String(!isOpen));
   $("#optionsToggle").setAttribute("aria-expanded", String(isOpen));
+  if (window.matchMedia("(max-width: 1019px)").matches) {
+    if (isOpen && state.mobileView !== "settings") {
+      state.mobileSettingsPreviousView = state.mobileView;
+      state.mobileView = "settings";
+    } else if (!isOpen && state.mobileView === "settings") {
+      state.mobileView = state.mobileSettingsPreviousView || "library";
+    }
+    syncMobileView();
+  }
 }
 
 function setSettingsFullView(expanded) {
@@ -3262,6 +3316,7 @@ async function selectSeries(seriesId, tab = "chapters") {
   }
   setFocusTab(tab);
   renderAll();
+  if (window.matchMedia("(max-width: 1019px)").matches) setMobileView("queue");
 }
 
 async function runSidebarSearch(query) {
@@ -4171,6 +4226,7 @@ if (themeMediaQuery) {
 initTheme();
 initLibraryRail();
 initLibraryStats();
+initMobileNavigation();
 renderAll();
 void refreshAll();
 setInterval(() => {

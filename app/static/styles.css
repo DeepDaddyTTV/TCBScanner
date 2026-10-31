@@ -2340,7 +2340,7 @@ input[type="checkbox"] {
     height: auto;
     min-height: 100vh;
     overflow: visible;
-    padding-bottom: 48px;
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
   }
 
   .app-frame {
@@ -2414,33 +2414,32 @@ input[type="checkbox"] {
 
   .series-list {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 0;
     overflow: visible;
     border-bottom: 1px solid var(--line);
   }
 
   .series-card {
-    grid-template-columns: 44px minmax(0, 1fr);
-    gap: 7px;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 10px;
     width: 100%;
     min-width: 0;
-    padding: 8px;
-    border-right: 1px solid var(--line);
+    padding: 10px 12px;
     border-bottom: 1px solid var(--line);
   }
 
   .series-cover {
-    width: 44px;
-    height: 60px;
+    width: 52px;
+    height: 68px;
   }
 
   .series-copy h3 {
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .series-copy p {
-    font-size: 9px;
+    font-size: 11px;
   }
 
   .series-card .series-body {
@@ -2600,14 +2599,16 @@ input[type="checkbox"] {
   }
 
   .focus-action-row {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .focus-action-row .small-action {
-    min-width: 116px;
-    padding-inline: 10px;
+    justify-content: center;
+    min-width: 0;
+    padding-inline: 4px;
+    gap: 4px;
     font-size: 10px;
   }
 
@@ -2735,9 +2736,7 @@ input[type="checkbox"] {
   }
 
   .status-strip {
-    grid-template-columns: 1fr auto;
-    min-height: 40px;
-    padding: 0 12px;
+    display: none;
   }
 
   .status-version {
@@ -2762,25 +2761,86 @@ input[type="checkbox"] {
     bottom: 0;
     z-index: 70;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    height: 48px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    height: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
     border-top: 1px solid var(--line-strong);
     background: var(--surface);
   }
 
-  .mobile-dock a {
+  .mobile-dock button {
     display: grid;
     place-items: center;
+    align-content: center;
+    gap: 3px;
     min-width: 0;
     border-right: 1px solid var(--line);
+    border-top: 2px solid transparent;
     color: var(--muted);
     font-size: 10px;
     font-weight: 700;
-    text-decoration: none;
+    background: transparent;
   }
 
-  .mobile-dock a:last-child {
+  .mobile-dock button > span:last-child {
+    font-size: 9px;
+    line-height: 1;
+  }
+
+  .mobile-dock button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .mobile-dock button[aria-current="page"] {
+    border-top-color: var(--sakura);
+    color: var(--sakura);
+  }
+
+  .mobile-dock button:last-child {
     border-right: 0;
+  }
+
+  .app-frame[data-mobile-view="library"] .command-bar,
+  .app-frame[data-mobile-view="library"] #chaptersSection,
+  .app-frame[data-mobile-view="library"] #toolsSection,
+  .app-frame[data-mobile-view="queue"] #librarySection,
+  .app-frame[data-mobile-view="queue"] #toolsSection,
+  .app-frame[data-mobile-view="add"] #librarySection,
+  .app-frame[data-mobile-view="add"] .command-bar,
+  .app-frame[data-mobile-view="add"] #chaptersSection,
+  .app-frame[data-mobile-view="activity"] #librarySection,
+  .app-frame[data-mobile-view="activity"] .command-bar,
+  .app-frame[data-mobile-view="activity"] #chaptersSection,
+  .app-frame[data-mobile-view="settings"] #librarySection,
+  .app-frame[data-mobile-view="settings"] .command-bar,
+  .app-frame[data-mobile-view="settings"] #chaptersSection,
+  .app-frame[data-mobile-view="settings"] #toolsSection,
+  .app-frame[data-mobile-view="settings"] .status-strip {
+    display: none !important;
+  }
+
+  .app-frame[data-mobile-view="add"] .utility-rail .activity-panel,
+  .app-frame[data-mobile-view="activity"] .utility-rail .sidebar-panel {
+    display: none !important;
+  }
+
+  .app-frame[data-mobile-view="add"] .utility-rail,
+  .app-frame[data-mobile-view="activity"] .utility-rail {
+    border: 0;
+  }
+
+  .app-frame[data-mobile-view="settings"] + .mobile-dock {
+    display: none;
+  }
+
+  .settings-drawer {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    max-width: none;
+    border-left: 0;
   }
 }
 
