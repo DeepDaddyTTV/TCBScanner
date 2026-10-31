@@ -525,7 +525,7 @@ class Store:
         if series_id is not None:
             query += " AND series_id = ?"
             params = (series_id,)
-        query += " ORDER BY sort_key ASC, discovered_at ASC"
+        query += " ORDER BY sort_key DESC, discovered_at DESC"
         with self._lock:
             rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
