@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      publish_dev:
+        description: Publish the selected branch to the moving dev channel
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -31,8 +37,8 @@ jobs:
       - name: Validate manual build request
         if: github.event_name == 'workflow_dispatch'
         run: |
-          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "Manual image publishing is only allowed from main."
+          if [ "$GITHUB_REF" != "refs/heads/main" ] && [ "${{ inputs.publish_dev }}" != "true" ]; then
+            echo "Manual builds from a non-main branch require publish_dev=true."
             exit 1
           fi
 
@@ -52,7 +58,8 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish_dev) }}
+            type=raw,value=${{ steps.version.outputs.app_version }},enable=${{ github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish_dev) }}
             type=sha,prefix=sha-
 
       - name: Build and push
